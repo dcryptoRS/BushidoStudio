@@ -1,0 +1,257 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+// The Claude pane (Royalty Studio fork): a conversation with Claude Code,
+// which edits the project on screen through the window's server in live
+// mode, and makes motion graphics with concat-studio. The process and its
+// stream are Rust's (panes/claude.rs); this is the window onto them.
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Pane, PaneHeader } from "pane.slint";
+import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
+
+export struct ChatEntry {
+    /// 0 you, 1 Claude, 2 a tool Claude used, 3 a note or an error
+    role: int,
+    text: string,
+}
+
+export global Claude {
+    /// The conversation, oldest first.
+    in property <[ChatEntry]> entries;
+    /// Claude is answering: the field waits, the stop button shows.
+    in property <bool> busy;
+    /// What it is doing right now, under the conversation: "Pensando…",
+    /// "Renderizando un overlay…". Empty when idle.
+    in property <string> status;
+    /// The line under the header: which project it is working on, or why
+    /// it cannot.
+    in property <string> note;
+    callback send(text: string);
+    callback stop();
+    callback reset();
+}
+
+component Bubble inherits Rectangle {
+    in property <ChatEntry> entry;
+    in property <length> room;
+
+    property <bool> mine: root.entry.role == 0;
+    property <bool> tool: root.entry.role == 2;
+    property <bool> note: root.entry.role == 3;
+
+    height: body.preferred-height + (root.tool || root.note ? 6px : 16px);
+
+    body := Text {
+        x: root.mine ? root.room - self.width - 4px : (root.tool ? 10px : 4px);
+        y: root.tool || root.note ? 3px : 8px;
+        width: Math.min(self.preferred-width, root.room - (root.tool ? 24px : 40px));
+        text: root.entry.text;
+        wrap: word-wrap;
+        font-size: root.tool || root.note ? Theme.fs-sm : Theme.fs-lg;
+        color: root.tool ? Theme.fg-muted : root.note ? Theme.fg-muted : Theme.fg;
+        font-italic: root.note;
+    }
+
+    // The speech bubble behind what you and Claude said; a tool line and a
+    // note go bare, so the conversation reads as a conversation.
+    if !root.tool && !root.note: Rectangle {
+        x: body.x - 10px;
+        y: body.y - 6px;
+        width: body.width + 20px;
+        height: body.height + 12px;
+        border-radius: Theme.r;
+        background: root.mine ? Theme.accent.with-alpha(0.18) : Theme.well;
+        border-width: 1px;
+        border-color: root.mine ? Theme.accent.with-alpha(0.35) : Theme.line;
+    }
+}
+
+export component ClaudePane inherits Pane {
+    in property <int> pane-seat;
+    in property <bool> pane-removable;
+    callback pane-picked(kind: PaneKind);
+    callback pane-removed();
+
+    property <string> draft;
+
+    function submit() {
+        if (Claude.busy || root.draft == "") {
+            return;
+        }
+        Claude.send(root.draft);
+        root.draft = "";
+    }
+
+    VerticalLayout {
+        PaneHeader {
+            title: "Claude";
+
+            VerticalLayout {
+                alignment: center;
+                PaneSwitcher {
+                    kind: PaneKind.claude;
+                    seat: root.pane-seat;
+                    removable: root.pane-removable;
+                    picked(kind) => { root.pane-picked(kind); }
+                    removed => { root.pane-removed(); }
+                }
+            }
+        }
+
+        // What it is working on, and the way to start over.
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 8px;
+            padding-top: 6px;
+            padding-bottom: 6px;
+            spacing: 8px;
+
+            Text {
+                text: Claude.note;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            reset := Rectangle {
+                width: 26px;
+                height: 22px;
+                border-radius: Theme.r-sm;
+                background: reset-touch.has-hover ? Theme.field-hover : transparent;
+                Icon {
+                    glyph: Glyph.plus;
+                    size: 13px;
+                    tint: Theme.fg-muted;
+                }
+                reset-touch := TouchArea {
+                    clicked => { Claude.reset(); }
+                }
+            }
+        }
+
+        // ── the conversation ────────────────────────────────────────────
+        list := Flickable {
+            vertical-stretch: 1;
+            content-height: column.preferred-height + 16px;
+
+            // Follows the end as the conversation grows and as the pane is
+            // resized, the way a chat does.
+            changed content-height => { self.content-y = Math.min(0px, self.height - self.content-height); }
+            changed height => { self.content-y = Math.min(0px, self.height - self.content-height); }
+
+            column := VerticalLayout {
+                x: 8px;
+                y: 8px;
+                width: list.width - 16px;
+                spacing: 4px;
+                alignment: start;
+
+                if Claude.entries.length == 0: Text {
+                    text: "Pídeme lo que quieras del vídeo abierto: «corta los silencios», «subtítulos palabra a palabra con la marca Royalty», «pon la LUT de S-Log3 y un look teal & orange», «un cierre con @royaltystudio».";
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                for entry in Claude.entries: Bubble {
+                    entry: entry;
+                    room: column.width;
+                }
+
+                if Claude.status != "": Text {
+                    text: Claude.status;
+                    color: Theme.accent;
+                    font-size: Theme.fs-sm;
+                }
+            }
+        }
+
+        // ── what you write ──────────────────────────────────────────────
+        HorizontalLayout {
+            padding: 8px;
+            spacing: 6px;
+            alignment: stretch;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: Math.min(140px, Math.max(34px, field.preferred-height + 16px));
+                border-radius: Theme.r;
+                background: Theme.well;
+                border-width: 1px;
+                border-color: field.has-focus ? Theme.accent : Theme.line;
+                clip: true;
+
+                field := TextInput {
+                    x: 10px;
+                    y: 8px;
+                    width: parent.width - 20px;
+                    height: parent.height - 16px;
+                    text <=> root.draft;
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    single-line: false;
+                    wrap: word-wrap;
+                    enabled: !Claude.busy;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.on-accent;
+                    // Enter sends; Shift+Enter is a new line. Home and End
+                    // stay in the field rather than walking the playhead.
+                    key-pressed(event) => {
+                        if (event.text == Key.Return && !event.modifiers.shift) {
+                            root.submit();
+                            return accept;
+                        }
+                        if (event.text == Key.Home) {
+                            self.set-selection-offsets(0, 0);
+                            return accept;
+                        }
+                        if (event.text == Key.End) {
+                            self.set-selection-offsets(1000000000, 1000000000);
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+
+                if root.draft == "" && !field.has-focus: Text {
+                    x: 10px;
+                    y: 8px;
+                    text: Claude.busy ? "Claude está trabajando…" : "Escríbele a Claude…";
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-lg;
+                }
+            }
+
+            // Send, or stop while it works.
+            VerticalLayout {
+                alignment: end;
+                Rectangle {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: Theme.r;
+                    background: Claude.busy ? Theme.field-hover
+                        : root.draft == "" ? Theme.field : Theme.accent;
+                    Icon {
+                        glyph: Claude.busy ? Glyph.minus : Glyph.sparkle;
+                        size: 15px;
+                        tint: Claude.busy ? Theme.fg : root.draft == "" ? Theme.fg-muted : Theme.on-accent;
+                    }
+                    TouchArea {
+                        clicked => {
+                            if (Claude.busy) {
+                                Claude.stop();
+                            } else {
+                                root.submit();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

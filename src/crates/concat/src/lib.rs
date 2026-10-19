@@ -33,6 +33,7 @@ mod ui {
 
 mod batch_volume;
 mod chips;
+mod claude;
 mod dock;
 mod fonts;
 mod format;
@@ -333,6 +334,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         models: Models::new(),
     });
     Shell::install(shell.clone());
+    // The Claude pane: its conversation and callbacks (Royalty Studio fork).
+    // Claude there may use only Concat's and concat-studio's tools and read
+    // files; see `claude::ALLOWED`.
+    claude::install(&app);
 
     // The machine's fonts, for the Text inspector's picker. Read on a
     // worker: on a machine with a few thousand faces it is a moment, and

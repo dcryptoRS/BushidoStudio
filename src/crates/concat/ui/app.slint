@@ -34,6 +34,7 @@ import { VoiceoverData, VoiceoverPanel } from "dialogs/voiceover.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
 import { Editor } from "editor.slint";
 import { PaneKind, Panes } from "workspace/pane-switcher.slint";
+import { ChatEntry, Claude } from "workspace/claude-pane.slint";
 import { ChipOption, NewProjectDialog, RecentProjectData, StartData, StartScreen } from "start.slint";
 import { TitleBar } from "title-bar.slint";
 import { PhoneEditor } from "phone/editor.slint";
@@ -66,6 +67,7 @@ export {
     TimelineTool, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
     ChipOption, RecentProjectData, StartData, SystemFactData, ToastData, ProjectSheetData,
     CaptionsSheetData, SpeechSheetData, VoiceoverData, SoundCardData, Sounds, VoiceCardData,
+    ChatEntry, Claude,
 }
 
 export component App inherits Window {
