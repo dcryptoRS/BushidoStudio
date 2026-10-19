@@ -114,6 +114,25 @@ impl Monitor {
         }
     }
 
+    /// A monitor on a GPU device of its own, for an API that draws frames
+    /// off the window's thread: on Vulkan the window's device must not be
+    /// submitted to from a second thread (see [`Monitor::off_thread`]
+    /// for the export's side of that). Without one - no GPU, or a build
+    /// without the feature - a monitor as [`Monitor::new`] makes, which
+    /// draws no shader: no looks, no effects (Royalty Studio fork).
+    pub fn with_own_gpu() -> Self {
+        #[cfg(feature = "gpu")]
+        {
+            let mut monitor = Self::new();
+            monitor.gpu = concat_render::WgpuCompositor::new().map(|gpu| Arc::new(Mutex::new(gpu)));
+            monitor
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            Self::new()
+        }
+    }
+
     /// Lets the GPU's frame textures go down to a quarter of their budget,
     /// for when playback stops: the pool fills as frames stream past, and a
     /// still picture needs only the few it shows. Nothing without a GPU.

@@ -119,6 +119,13 @@ impl VideoCodec {
         }
         match self {
             VideoCodec::H264 if macos => &["libx264", "h264_videotoolbox"],
+            // Royalty Studio: with hardware asked for, H.264 goes to the GPU
+            // first as HEVC does; libx264 stays behind it for a card whose
+            // encoder does not open.
+            VideoCodec::H264 if hardware && windows => {
+                &["h264_nvenc", "h264_qsv", "h264_amf", "libx264", "h264_mf"]
+            }
+            VideoCodec::H264 if hardware => &["h264_nvenc", "h264_qsv", "h264_amf", "libx264"],
             VideoCodec::H264 if windows => {
                 &["libx264", "h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"]
             }

@@ -274,7 +274,11 @@ impl Api {
     /// An API over this machine's app directories, reporting its jobs
     /// through `events`.
     pub fn new(events: EventSink) -> Result<Api, String> {
-        Ok(Api::with_dirs(AppDirs::locate()?, events))
+        let mut api = Api::with_dirs(AppDirs::locate()?, events);
+        // Frames drawn on a GPU of the API's own, so a preview shows the
+        // looks and effects an export draws; a test's API stays on the CPU.
+        api.monitor = Monitor::with_own_gpu();
+        Ok(api)
     }
 
     /// An API over the given directories: a test's scratch, or an embedder

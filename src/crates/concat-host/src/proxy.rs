@@ -213,12 +213,21 @@ pub fn write(
     // Written beside the target under a name the muxer still knows the
     // format of, and moved into place only when whole.
     let partial = target.with_extension("part.mp4");
+    // On a desktop NVIDIA card the copy is made on the card end to end -
+    // NVDEC in, NVENC out - and the CPU stays with playback. A laptop's
+    // chip is a scarcer thing, and there the copy keeps to the CPU as
+    // before (Royalty Studio fork).
+    let on_card = concat_media::hardware::hardware_device() == Some(concat_media::HwDevice::Cuda);
     let options = DecodeOptions::default()
         .scaled_to(width, height)
-        .in_software()
         .threaded(2)
         .in_range(range)
         .deep(hdr);
+    let options = if on_card {
+        options
+    } else {
+        options.in_software()
+    };
     let mut decoder = Decoder::open(source, &options).map_err(|error| error.to_string())?;
     let encoding = EncodeOptions {
         codec: if hdr {
@@ -236,7 +245,7 @@ pub fn write(
         color_range: ColorRange::Limited,
         // HEVC in ten bits costs the CPU far more than H.264 does; the
         // media engine does it for nothing where there is one.
-        hardware: hdr,
+        hardware: hdr || on_card,
         threads: 2,
     };
     let mut encoder = if hdr {

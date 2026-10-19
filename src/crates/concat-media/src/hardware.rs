@@ -26,7 +26,8 @@
 //! device instead, which is what the tests do.
 //!
 //! The device is the platform's own: VideoToolbox on macOS and iOS, D3D11VA
-//! on Windows, MediaCodec on Android. VAAPI on Linux is never chosen by
+//! on Windows, MediaCodec on Android, and on Linux NVIDIA's NVDEC (through
+//! CUDA) when the NVIDIA driver is loaded. VAAPI on Linux is never chosen by
 //! default and only ever by name, because on an Intel i915 it has hung the
 //! GPU for every process on the machine until a reboot (issue #70).
 //!
@@ -79,19 +80,25 @@ pub enum HwDevice {
     /// The Linux video acceleration API. Never the default; see the module
     /// doc and issue #70.
     Vaapi,
+    /// NVIDIA's NVDEC, through CUDA: the default on Linux when the NVIDIA
+    /// driver is loaded. A stream its chip has no profile for (H.264 4:2:2,
+    /// say) is refused at `get_format` and decodes in software.
+    Cuda,
 }
 
 impl HwDevice {
     /// Every device, in the order a menu would list them.
-    pub const ALL: [HwDevice; 4] = [
+    pub const ALL: [HwDevice; 5] = [
         HwDevice::VideoToolbox,
         HwDevice::D3d11va,
         HwDevice::MediaCodec,
         HwDevice::Vaapi,
+        HwDevice::Cuda,
     ];
 
     /// The device this binary's platform has, or `None` where there is no
-    /// device worth choosing unasked: Linux, whose VAAPI is opt-in only.
+    /// device worth choosing unasked: Linux without the NVIDIA driver, whose
+    /// VAAPI is opt-in only.
     pub fn platform_default() -> Option<Self> {
         if cfg!(any(target_os = "macos", target_os = "ios")) {
             Some(HwDevice::VideoToolbox)
@@ -99,6 +106,8 @@ impl HwDevice {
             Some(HwDevice::D3d11va)
         } else if cfg!(target_os = "android") {
             Some(HwDevice::MediaCodec)
+        } else if cfg!(target_os = "linux") && nvidia_driver_loaded() {
+            Some(HwDevice::Cuda)
         } else {
             None
         }
@@ -111,6 +120,7 @@ impl HwDevice {
             HwDevice::D3d11va => "Direct3D 11",
             HwDevice::MediaCodec => "MediaCodec",
             HwDevice::Vaapi => "VAAPI",
+            HwDevice::Cuda => "NVIDIA NVDEC",
         }
     }
 
@@ -121,6 +131,7 @@ impl HwDevice {
             HwDevice::D3d11va => "d3d11va",
             HwDevice::MediaCodec => "mediacodec",
             HwDevice::Vaapi => "vaapi",
+            HwDevice::Cuda => "cuda",
         }
     }
 
@@ -148,6 +159,7 @@ impl HwDevice {
             HwDevice::D3d11va => sys::AVHWDeviceType::D3D11VA,
             HwDevice::MediaCodec => sys::AVHWDeviceType::MEDIACODEC,
             HwDevice::Vaapi => sys::AVHWDeviceType::VAAPI,
+            HwDevice::Cuda => sys::AVHWDeviceType::CUDA,
         }
     }
 }
@@ -205,9 +217,18 @@ impl HwPolicy {
 ///
 /// A phone's cores are no match for its decoder, and MediaCodec takes
 /// everything [`mediacodec_decoder`] has a decoder for.
+///
+/// NVDEC takes 8-bit H.264 too. A desktop card's decoder is no laptop
+/// chip's: a 97 Mbit/s 4K H.264 file decoded at 138 frames a second on an
+/// RTX 3060 Ti, copy back included, against 61 on all eight threads of the
+/// Xeon E5-1620 v3 beside it - and on the card the cores stay free for the
+/// rest of the app.
 pub fn hardware_wins(device: HwDevice, codec: ffmpeg::codec::Id, format: Pixel) -> bool {
     if device == HwDevice::MediaCodec {
         return mediacodec_decoder(codec, format).is_some();
+    }
+    if device == HwDevice::Cuda {
+        return cuda_takes(codec);
     }
     // SAFETY: a descriptor points into libavutil's static table, and every
     // pixel format has at least one component.
@@ -433,6 +454,24 @@ pub(crate) fn note_wrapped(device: HwDevice, name: &'static str) {
     }
 }
 
+/// The codecs NVDEC is handed: the moving-picture ones. NVDEC has an
+/// MJPEG decoder too, but a still or a thumbnail is one picture, and
+/// setting a CUDA decoder up for it costs more than decoding it on the CPU.
+fn cuda_takes(codec: ffmpeg::codec::Id) -> bool {
+    use ffmpeg::codec::Id;
+    matches!(
+        codec,
+        Id::H264 | Id::HEVC | Id::AV1 | Id::VP9 | Id::VP8 | Id::MPEG2VIDEO
+    )
+}
+
+/// Whether NVIDIA's kernel driver is loaded, which is what CUDA, and so
+/// NVDEC, needs. Cheap: one file's existence, read once.
+fn nvidia_driver_loaded() -> bool {
+    static LOADED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LOADED.get_or_init(|| std::path::Path::new("/proc/driver/nvidia/version").exists())
+}
+
 /// The process-wide preference: `0` for software, else one past the
 /// device's index in [`HwDevice::ALL`]. An atomic rather than a lock
 /// because every `Decoder::open` reads it.
@@ -519,6 +558,9 @@ impl Device {
     /// The pixel format `codec` decodes to on this device, if it can
     /// decode on it at all.
     fn pixel_format(&self, codec: &ffmpeg::Codec) -> Option<Pixel> {
+        if self.kind == HwDevice::Cuda && !cuda_takes(codec.id()) {
+            return None;
+        }
         hardware_format(codec.as_ptr(), self.kind.av_type()).map(Pixel::from)
     }
 

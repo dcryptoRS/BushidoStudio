@@ -177,7 +177,19 @@ impl Headless {
     /// roots `CONCAT_MCP_ROOTS` names (the platform's path-list syntax),
     /// or the user's home.
     pub fn start() -> Result<Headless, String> {
-        Ok(Headless::with_api(Api::new(Arc::new(|_| {}))?))
+        let api = Api::new(Arc::new(|_| {}))?;
+        // What the window does at start, so an agent's previews and exports
+        // decode on the GPU and can use the looks imported from .cube
+        // tables: without the second, a clip carrying one exports without it.
+        concat_media::set_hardware_decode(true);
+        let looks = api.dirs().config.join("effects");
+        for error in concat_effects::Catalogue::install(&looks) {
+            eprintln!(
+                "concat mcp: a look in {} did not load: {error}",
+                looks.display()
+            );
+        }
+        Ok(Headless::with_api(api))
     }
 
     /// An API made by the caller - a test's, over a scratch folder.
