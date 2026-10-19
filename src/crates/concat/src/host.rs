@@ -59,6 +59,8 @@ pub struct Host {
     pub server: Option<concat_server::Server>,
     /// Which project folders are open, here or over the socket.
     pub open_projects: concat_api::OpenProjects,
+    /// The folder of the project on screen, for the server's live mode.
+    pub live_folder: crate::live::LiveFolder,
 }
 
 impl Host {
@@ -87,6 +89,7 @@ impl Host {
             speech: Arc::new(Speech::new()),
             server: None,
             open_projects: concat_api::OpenProjects::default(),
+            live_folder: crate::live::LiveFolder::default(),
         })
     }
 }

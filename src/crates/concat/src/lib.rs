@@ -44,6 +44,7 @@ mod i18n;
 #[cfg(target_os = "ios")]
 mod ios;
 mod keymap;
+mod live;
 mod meters;
 mod platform;
 /// What a phone's own crate installs before the window runs: the way to
@@ -1906,6 +1907,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         state.handle(Msg::Settings(SettingsMsg::DownloadBaseEdited(
             text.to_string(),
         )));
+    }));
+    app.on_settings_server_live_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Settings(SettingsMsg::ServerLiveChanged(on)));
     }));
     app.on_settings_server_enabled_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Settings(SettingsMsg::ServerEnabledChanged(on)));

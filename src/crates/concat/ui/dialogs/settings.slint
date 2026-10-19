@@ -85,6 +85,8 @@ export struct SettingsData {
     download-base: string,
     /// the Concat API served on a socket while the window is open
     server-enabled: bool,
+    /// live mode: a caller may edit the project on screen
+    server-live: bool,
     /// the two halves of "127.0.0.1:7420"
     server-host: string,
     server-port: int,
@@ -621,6 +623,7 @@ export component SettingsDialog inherits Modal {
     callback download-source-changed(index: int);
     callback download-base-edited(text: string);
     callback server-enabled-changed(on: bool);
+    callback server-live-changed(on: bool);
     callback server-host-edited(text: string);
     callback server-port-edited(port: int);
     callback server-token-edited(text: string);
@@ -1430,6 +1433,17 @@ export component SettingsDialog inherits Modal {
                             triggered => { root.token-copied = false; }
                         }
                     }
+                }
+
+                // Live mode (#337): a script or an agent edits the project on
+                // screen, its edits landing here and in this window's undo.
+                // Off unless asked for; it only means anything while serving.
+                if root.data.server-enabled: DialogSection {
+                    title: I18n.t("settings.liveMode");
+                    hint: I18n.t("settings.liveModeHint");
+                    switchable: true;
+                    on: root.data.server-live;
+                    switched(on) => { root.server-live-changed(on); }
                 }
             }
 

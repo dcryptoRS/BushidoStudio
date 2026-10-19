@@ -29,6 +29,7 @@
 //! with, from that thread, which is why the sink must be `Send + Sync`.
 
 mod job;
+mod live;
 pub mod message;
 pub mod rpc;
 
@@ -51,6 +52,7 @@ use concat_host::templates::{self, SlotFill};
 use concat_host::{ProjectInfo, Session, Titles, lock, media, projects};
 use concat_project::Command;
 use concat_project::model::VideoSettings;
+pub use live::{Live, LiveJob};
 
 pub use message::{
     API_VERSION, ApiError, Dirs, Done, ErrorCode, Event, ExportSpec, Fill, JobState, JobStatus,
@@ -243,6 +245,8 @@ pub struct Api {
     book: Arc<job::Book>,
     /// [`VersionInfo::capabilities`], in the order they were added.
     capabilities: Vec<String>,
+    /// The window's project, reachable in live mode; see [`live`].
+    live: Option<Arc<dyn Live>>,
 }
 
 /// A way to stop the jobs of one [`Api`] from any thread, without waiting
@@ -306,6 +310,7 @@ impl Api {
             jobs: Jobs::default(),
             dirs,
             capabilities: CAPABILITIES.iter().map(|name| (*name).to_owned()).collect(),
+            live: None,
         }
     }
 
@@ -359,6 +364,14 @@ impl Api {
     /// round.
     pub fn share_open_projects(&mut self, open: OpenProjects) {
         self.open = open;
+    }
+
+    /// Takes the window's side of live mode: from here on a request naming
+    /// the project the window has open runs against the window's session
+    /// rather than being refused. See [`live`].
+    pub fn share_live(&mut self, live: Arc<dyn Live>) {
+        self.add_capability("live");
+        self.live = Some(live);
     }
 
     /// Confines every write to `roots`: from here on a created project, an
@@ -434,6 +447,32 @@ impl Api {
     }
 
     fn run(&mut self, request: Request) -> Result<Reply, ApiError> {
+        let Some((live, folder)) = self.live_target(&request) else {
+            return self.run_here(request);
+        };
+        if !live::on_snapshot(&request) {
+            return live::route(&live, request);
+        }
+        // A read that renders or writes a file: run here, on a copy of the
+        // window's session, so the window's thread is not held.
+        let snapshot = live.snapshot()?;
+        let key = key_of(&folder);
+        self.sessions.insert(key.clone(), snapshot);
+        let answer = self.run_here(request);
+        self.sessions.remove(&key);
+        answer
+    }
+
+    /// The window's side of live mode and its folder, when `request` names
+    /// the project the window has open.
+    fn live_target(&self, request: &Request) -> Option<(Arc<dyn Live>, String)> {
+        let live = self.live.as_ref()?;
+        let folder = live.folder()?;
+        let path = live::project_of(request)?;
+        (key_of(path) == key_of(&folder)).then(|| (Arc::clone(live), folder))
+    }
+
+    fn run_here(&mut self, request: Request) -> Result<Reply, ApiError> {
         let view = |view: EditorView| Ok(Reply::View(Box::new(view)));
         match request {
             Request::Version => Ok(Reply::Version(self.version())),
@@ -1782,5 +1821,98 @@ mod tests {
             "{}",
             refused.message
         );
+    }
+
+    /// The window's side of live mode, played by a session the test holds.
+    struct FakeWindow {
+        folder: String,
+        session: Mutex<Session>,
+        edits: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Live for FakeWindow {
+        fn folder(&self) -> Option<String> {
+            Some(self.folder.clone())
+        }
+
+        fn run(&self, edits: bool, job: LiveJob) -> Result<Reply, ApiError> {
+            if edits {
+                self.edits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            job(&mut self.session.lock().expect("session"))
+        }
+
+        fn snapshot(&self) -> Result<Session, ApiError> {
+            Ok(self.session.lock().expect("session").snapshot())
+        }
+    }
+
+    #[test]
+    fn live_mode_edits_the_windows_session_and_reads_a_copy_of_it() {
+        let (mut api, scratch, _events) = api();
+        // The project as the window would have it: open there, not here.
+        let path = project(&mut api, &scratch, "Live");
+        ok(api.dispatch(Request::ProjectClose {
+            path: path.clone(),
+            save: true,
+        }));
+        let info = projects::open(&path).expect("opens");
+        let window = Arc::new(FakeWindow {
+            folder: path.clone(),
+            session: Mutex::new(Session::open_info(&info).expect("a session")),
+            edits: std::sync::atomic::AtomicUsize::new(0),
+        });
+        api.share_live(Arc::clone(&window) as Arc<dyn Live>);
+        assert!(api.version().capabilities.iter().any(|name| name == "live"));
+        let clips = |window: &FakeWindow| {
+            window
+                .session
+                .lock()
+                .expect("session")
+                .project()
+                .active()
+                .clips
+                .len()
+        };
+
+        // An edit lands in the window's session, as one step of its undo.
+        let added = view(ok(api.dispatch(Request::EditApply {
+            path: path.clone(),
+            command: Box::new(Command::AddTextClip {
+                above: false,
+                track_id: None,
+                start: 1.0,
+                style: None,
+                duration: Some(2.0),
+                offset_y: None,
+            }),
+        })));
+        assert!(added.created_id.is_some());
+        assert!(added.can_undo);
+        assert_eq!(window.edits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(clips(&window), 1);
+
+        // Opening it answers with the window's project; nothing opens here.
+        let opened = view(ok(api.dispatch(Request::ProjectOpen { path: path.clone() })));
+        assert_eq!(opened.project.active().clips.len(), 1);
+        assert!(api.sessions.is_empty());
+
+        // A read that writes a file runs on a copy and leaves none behind.
+        assert!(matches!(
+            ok(api.dispatch(Request::ProjectDocument { path: path.clone() })),
+            Reply::Document(_)
+        ));
+        assert!(api.sessions.is_empty());
+
+        // Closing it lets go of nothing: the project stays the window's.
+        ok(api.dispatch(Request::ProjectClose {
+            path: path.clone(),
+            save: false,
+        }));
+        assert_eq!(clips(&window), 1);
+
+        // Undo is the window's too.
+        ok(api.dispatch(Request::EditUndo { path }));
+        assert_eq!(clips(&window), 0);
     }
 }

@@ -2706,6 +2706,35 @@ impl Studio {
         }
     }
 
+    /// A live-mode call from the window's server (`crate::live`): `job` run
+    /// on this window's session, with the bookkeeping [`Studio::apply`]
+    /// does around an edit of the window's own when it `edits`, so the
+    /// caller's edit is on screen and one step in this window's undo.
+    pub fn run_live(
+        &mut self,
+        edits: bool,
+        job: concat_api::LiveJob,
+    ) -> Result<concat_api::Reply, concat_api::ApiError> {
+        if edits {
+            self.end_burst();
+            self.flush_commit();
+            self.echo = None;
+            self.last_commit = None;
+        }
+        let Some(session) = self.session.as_mut() else {
+            return Err(concat_api::ApiError::new(
+                concat_api::ErrorCode::NotOpen,
+                "the window has no project open".to_owned(),
+            ));
+        };
+        let answer = job(session);
+        if edits && answer.is_ok() {
+            log::info!("edit: from the server (live mode)");
+            self.after_change();
+        }
+        answer
+    }
+
     /// [`Studio::apply`] as one move of an inspector gesture: the same
     /// bookkeeping, but the editor folds it into the gesture's undo step
     /// and the coalescing window stays open for the next move.
@@ -8150,6 +8179,7 @@ impl Studio {
                 if swept > 0 {
                     log::info!("{swept} stale proxies swept from {}", project_dir.display());
                 }
+                self.host.live_folder.set(Some(session.path().to_owned()));
                 self.session = Some(session);
                 crate::host::next_project_epoch();
                 self.forget_art();
@@ -8337,6 +8367,7 @@ impl Studio {
         if let Some(session) = self.session.as_ref() {
             self.host.open_projects.release(session.path());
         }
+        self.host.live_folder.set(None);
         self.session = None;
         // Whatever a worker still brings back for this project is dropped
         // at delivery; the sheets that were waiting on one stop waiting.

@@ -230,6 +230,10 @@ pub struct ServerPrefs {
     /// What a connection presents first. Empty means none, which the
     /// server only allows on loopback.
     pub token: String,
+    /// Live mode (#337): a caller may edit the project that is open here,
+    /// its edits landing on screen and in this window's undo history. Off
+    /// by default; with it off, a caller is kept to projects of its own.
+    pub live: bool,
 }
 
 impl Default for ServerPrefs {
@@ -238,6 +242,7 @@ impl Default for ServerPrefs {
             enabled: false,
             listen: DEFAULT_LISTEN.to_owned(),
             token: String::new(),
+            live: false,
         }
     }
 }

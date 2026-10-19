@@ -485,6 +485,8 @@
   "settings.scaleSystem": "System",
   "settings.scriptsAndApps": "Scripts and apps",
   "settings.servesConcatApiWhile": "Serves the Concat API while the window is open, so a script or another program can create, edit and export projects of its own. Anything that connects can read and write files as you can.",
+  "settings.liveMode": "Let scripts edit the open project",
+  "settings.liveModeHint": "A script or an AI agent connected here can edit the project open in this window: its edits appear as it makes them and land in this window's undo history. Off, it only works on projects of its own.",
   "settings.shortcuts": "Shortcuts",
   "settings.showTheLog": "Show the log",
   "settings.showTheToken": "Show the token",

@@ -300,6 +300,22 @@ impl Session {
         self.editor.to_document(&self.settings)
     }
 
+    /// A copy of this session to read from: the same folder, settings and
+    /// project, without the history. What the API reads the window's
+    /// project through in live mode - previews, exports, the document - on
+    /// a thread of its own, while edits go to the window's session itself.
+    pub fn snapshot(&self) -> Session {
+        let editor = Editor::from_document(&self.document())
+            .unwrap_or_else(|| Editor::with_video(self.settings.video()));
+        Session {
+            path: self.path.clone(),
+            settings: self.settings.clone(),
+            editor,
+            upgraded: Vec::new(),
+            retired: concat_project::RetiredFields::default(),
+        }
+    }
+
     /// The active timeline flattened for rendering. This is what export and
     /// preview consume: the engine flattens its own session, so the pixels
     /// rendered are the model's, never a copy of it.
