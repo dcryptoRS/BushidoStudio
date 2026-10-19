@@ -25,6 +25,8 @@ import { Theme } from "../theme/theme.slint";
 export component ColSplitter inherits Rectangle {
     callback pressed();
     callback moved(delta: length);
+    /// The drag ended: the size it left is the one to keep.
+    callback released();
 
     property <length> origin;
 
@@ -54,6 +56,9 @@ export component ColSplitter inherits Rectangle {
                 root.origin = self.absolute-position.x + self.mouse-x;
                 root.pressed();
             }
+            if (event.kind == PointerEventKind.up) {
+                root.released();
+            }
         }
         moved => {
             root.moved(self.absolute-position.x + self.mouse-x - root.origin);
@@ -64,6 +69,8 @@ export component ColSplitter inherits Rectangle {
 export component RowSplitter inherits Rectangle {
     callback pressed();
     callback moved(delta: length);
+    /// The drag ended: the size it left is the one to keep.
+    callback released();
 
     property <length> origin;
 
@@ -88,6 +95,9 @@ export component RowSplitter inherits Rectangle {
             if (event.kind == PointerEventKind.down) {
                 root.origin = self.absolute-position.y + self.mouse-y;
                 root.pressed();
+            }
+            if (event.kind == PointerEventKind.up) {
+                root.released();
             }
         }
         moved => {

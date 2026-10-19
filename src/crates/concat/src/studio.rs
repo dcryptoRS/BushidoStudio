@@ -2228,6 +2228,12 @@ impl Studio {
     /// read off disk.
     pub fn new(host: Host) -> Self {
         let prefs = Preferences::load(&host.dirs);
+        // The panels where they were left, or the default arrangement.
+        let dock = prefs
+            .dock
+            .as_ref()
+            .and_then(crate::dock::Dock::from_saved)
+            .unwrap_or_else(default_dock);
         let mut start = crate::panes::start::StartPane::default();
         if let Some(location) = prefs.project_location() {
             start.location = location.to_owned();
@@ -2298,7 +2304,7 @@ impl Studio {
             posters_pending: HashSet::new(),
             lengths: HashMap::new(),
             project_name: "Untitled project".into(),
-            dock: default_dock(),
+            dock,
             dock_aside: crate::dock::compact_dock(),
             compact: false,
             workspace: (0.0, 0.0),
@@ -8821,6 +8827,18 @@ impl Studio {
 
     /// Shows the compact dock, or the wide one, keeping whichever is put
     /// away whole; see `COMPACT_WIDTH`.
+    /// Keeps the desktop arrangement in the preferences, for the next
+    /// launch. While the compact one is showing, the desktop one is aside.
+    pub fn remember_dock(&mut self) {
+        let desktop = if self.compact {
+            &self.dock_aside
+        } else {
+            &self.dock
+        };
+        self.prefs.dock = Some(desktop.saved());
+        self.prefs.save(&self.host.dirs);
+    }
+
     pub fn set_compact(&mut self, compact: bool) {
         if compact != self.compact {
             std::mem::swap(&mut self.dock, &mut self.dock_aside);

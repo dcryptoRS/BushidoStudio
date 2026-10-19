@@ -536,6 +536,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_titlebar_close(|| {
         log::info!("close: titlebar X pressed");
         Shell::with(|shell, app| {
+            shell.studio.borrow_mut().remember_dock();
             let outcome = close_window(
                 || shell.studio.borrow_mut().close_project(),
                 || {
@@ -562,6 +563,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         log::info!("close: system close request (Alt+F4 / taskbar)");
         let saved = std::cell::Cell::new(true);
         Shell::with(|shell, app| {
+            shell.studio.borrow_mut().remember_dock();
             let outcome = close_window(
                 || shell.studio.borrow_mut().close_project(),
                 || {
@@ -708,6 +710,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         if let Dock::Leaf(held) = state.dock.at_mut(&path) {
             *held = kind;
         }
+        state.remember_dock();
     }));
     editor.on_dock_dropped(on_dock!(|state, from: i32, onto: i32, side: DockSide| {
         let (from, onto) = (from.max(0) as usize, onto.max(0) as usize);
@@ -727,6 +730,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                     *held = kind;
                 }
             }
+            state.remember_dock();
             return;
         }
         let (Some(onto_path), Some(from_path)) =
@@ -736,6 +740,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         };
         state.dock.split_leaf(&onto_path, taken, side);
         state.dock.remove_leaf(&from_path);
+        state.remember_dock();
     }));
     editor.on_dock_add(on_dock!(|state, kind: PaneKind| {
         let seats = state.dock_layout().seats;
@@ -756,12 +761,17 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             return;
         };
         state.dock.split_leaf(&path, kind, side);
+        state.remember_dock();
     }));
     editor.on_dock_remove(on_dock!(|state, seat: i32| {
         let Some(path) = state.dock.leaf_path(seat.max(0) as usize) else {
             return;
         };
         state.dock.remove_leaf(&path);
+        state.remember_dock();
+    }));
+    editor.on_divider_released(on_dock!(|state, _index: i32| {
+        state.remember_dock();
     }));
     editor.on_divider_pressed(on_dock!(|state, index: i32| {
         let index = index.max(0) as usize;

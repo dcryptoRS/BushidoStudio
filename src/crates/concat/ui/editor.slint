@@ -66,6 +66,8 @@ export global Editor {
     /// started from — see the pane splitters, which have the same shape.
     callback divider-pressed(index: int);
     callback divider-dragged(index: int, delta: length);
+    /// A gutter was let go: the arrangement is kept for the next launch.
+    callback divider-released(index: int);
 
     // ── the library ──
     in-out property <[MediaItemData]> media;

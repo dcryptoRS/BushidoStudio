@@ -111,6 +111,9 @@ pub struct Preferences {
     /// unless the Settings sheet was asked for more or less. CONCAT_LOG in
     /// the environment overrides it for one run.
     pub log_level: Option<String>,
+    /// The desktop arrangement of the panels as it was last left; none for
+    /// the default one.
+    pub dock: Option<crate::dock::SavedDock>,
     /// How the voiceover panel was last set up.
     #[serde(default)]
     pub voiceover: VoiceoverPrefs,

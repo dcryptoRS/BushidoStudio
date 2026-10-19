@@ -65,6 +65,7 @@ export component Workspace inherits Rectangle {
 
             pressed => { Editor.divider-pressed(divider.index); }
             moved(delta) => { Editor.divider-dragged(divider.index, delta); }
+            released => { Editor.divider-released(divider.index); }
         }
 
         if !divider.columns: RowSplitter {
@@ -73,6 +74,7 @@ export component Workspace inherits Rectangle {
 
             pressed => { Editor.divider-pressed(divider.index); }
             moved(delta) => { Editor.divider-dragged(divider.index, delta); }
+            released => { Editor.divider-released(divider.index); }
         }
     }
 }

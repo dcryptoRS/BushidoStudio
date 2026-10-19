@@ -4,6 +4,8 @@
 //! The workspace's arrangement: a tree of splits and views, walked flat
 //! for Slint, which has no recursion.
 
+use serde::{Deserialize, Serialize};
+
 use crate::ui::{DockDivider, DockSide, PaneKind, SeatBox};
 
 pub const SEAT_MIN_W: f32 = 240.0;
@@ -29,7 +31,88 @@ pub enum Dock {
     },
 }
 
+/// The arrangement as the preferences keep it, so the panels a person moved
+/// and sized are where they left them next time (Royalty Studio fork). A
+/// view goes by the name `Panes.id` gives it; a split by its halves.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SavedDock {
+    Leaf(String),
+    Split {
+        columns: bool,
+        ratio: f32,
+        first: Box<SavedDock>,
+        second: Box<SavedDock>,
+    },
+}
+
+/// A view's name in [`SavedDock`]: the slug `Panes.id` hands out.
+fn kind_name(kind: PaneKind) -> &'static str {
+    match kind {
+        PaneKind::Media => "media",
+        PaneKind::Preview => "preview",
+        PaneKind::Inspector => "inspector",
+        PaneKind::Timeline => "timeline",
+        PaneKind::Keyframes => "keyframes",
+        PaneKind::Claude => "claude",
+    }
+}
+
+fn kind_named(name: &str) -> Option<PaneKind> {
+    Some(match name {
+        "media" => PaneKind::Media,
+        "preview" => PaneKind::Preview,
+        "inspector" => PaneKind::Inspector,
+        "timeline" => PaneKind::Timeline,
+        "keyframes" => PaneKind::Keyframes,
+        "claude" => PaneKind::Claude,
+        _ => return None,
+    })
+}
+
 impl Dock {
+    /// The arrangement to keep in the preferences.
+    pub fn saved(&self) -> SavedDock {
+        match self {
+            Dock::Leaf(kind) => SavedDock::Leaf(kind_name(*kind).to_owned()),
+            Dock::Split {
+                columns,
+                ratio,
+                first,
+                second,
+            } => SavedDock::Split {
+                columns: *columns,
+                ratio: *ratio,
+                first: Box::new(first.saved()),
+                second: Box::new(second.saved()),
+            },
+        }
+    }
+
+    /// The arrangement the preferences kept, or `None` when it names a view
+    /// this build does not have - one from a newer build, or a hand edit -
+    /// and the default arrangement should stand instead.
+    pub fn from_saved(saved: &SavedDock) -> Option<Dock> {
+        Some(match saved {
+            SavedDock::Leaf(name) => Dock::Leaf(kind_named(name)?),
+            SavedDock::Split {
+                columns,
+                ratio,
+                first,
+                second,
+            } => Dock::Split {
+                columns: *columns,
+                ratio: if ratio.is_finite() {
+                    ratio.clamp(0.05, 0.95)
+                } else {
+                    0.5
+                },
+                first: Box::new(Dock::from_saved(first)?),
+                second: Box::new(Dock::from_saved(second)?),
+            },
+        })
+    }
+
     pub fn leaf(kind: PaneKind) -> Box<Dock> {
         Box::new(Dock::Leaf(kind))
     }
@@ -329,4 +412,49 @@ pub fn nearest_row(heights: &[f32], y: f32) -> i32 {
         top += height;
     }
     best
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn json(dock: &Dock) -> String {
+        serde_json::to_string(&dock.saved()).expect("serialises")
+    }
+
+    #[test]
+    fn an_arrangement_comes_back_as_it_was_kept() {
+        let mut dock = default_dock();
+        let path = dock.leaf_path(0).expect("a first seat");
+        dock.split_leaf(&path, PaneKind::Claude, DockSide::Right);
+        let kept: SavedDock = serde_json::from_str(&json(&dock)).expect("parses");
+        let back = Dock::from_saved(&kept).expect("every view is known");
+        assert_eq!(json(&back), json(&dock));
+        assert!(back.contains(PaneKind::Claude));
+    }
+
+    #[test]
+    fn a_view_this_build_lacks_falls_back_to_the_default() {
+        let kept = SavedDock::Split {
+            columns: true,
+            ratio: 0.5,
+            first: Box::new(SavedDock::Leaf("media".to_owned())),
+            second: Box::new(SavedDock::Leaf("hologram".to_owned())),
+        };
+        assert!(Dock::from_saved(&kept).is_none());
+    }
+
+    #[test]
+    fn a_ratio_out_of_range_is_held_inside_it() {
+        let kept = SavedDock::Split {
+            columns: false,
+            ratio: 7.0,
+            first: Box::new(SavedDock::Leaf("preview".to_owned())),
+            second: Box::new(SavedDock::Leaf("timeline".to_owned())),
+        };
+        let Some(Dock::Split { ratio, .. }) = Dock::from_saved(&kept) else {
+            panic!("a split");
+        };
+        assert_eq!(ratio, 0.95);
+    }
 }
