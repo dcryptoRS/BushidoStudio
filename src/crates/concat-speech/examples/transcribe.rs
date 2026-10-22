@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+// SPDX-FileCopyrightText: 2026 Royalty Studio
 
 //! Transcribes a file with an installed model and says how long it took
 //! (Royalty Studio fork): a check that whisper runs where it should - on

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+// SPDX-FileCopyrightText: 2026 Royalty Studio
 
 //! The video scopes (Royalty Studio fork): a waveform, an RGB parade, a
 //! vectorscope and a histogram of a frame, worked out on the GPU from the

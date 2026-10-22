@@ -559,6 +559,13 @@ impl SettingsPane {
         if self.checking {
             return;
         }
+        // No release channel of its own yet (Royalty Studio fork): said,
+        // rather than asked of Concat's.
+        if !updates::ENABLED {
+            self.checked = true;
+            self.update_status = t("settings.noUpdateChannel");
+            return;
+        }
         self.checking = true;
         self.update_status = t("settings.checkingForUpdates");
         spawn(updates::fetch_releases, |studio, _, _, result| {

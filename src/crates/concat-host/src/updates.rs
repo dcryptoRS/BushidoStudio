@@ -36,6 +36,11 @@ use crate::models;
 /// The repository the releases are read from.
 pub const REPO: &str = "jub0t/Concat";
 
+/// Whether this build looks for releases at all. Off in Bushido Studio
+/// until it has a release channel of its own: Concat's releases are not
+/// its own, and putting one in its place would replace it with Concat.
+pub const ENABLED: bool = false;
+
 /// The first release with a Version page: the earliest one a person can
 /// come back from, so the earliest one offered.
 pub const FIRST_SWITCHABLE: Version = Version::new(0, 2, 5);
@@ -173,6 +178,9 @@ fn github_message(value: &serde_json::Value) -> String {
 
 /// Asks GitHub for the releases; see [`releases_from_json`].
 pub fn fetch_releases() -> Result<Vec<Release>, String> {
+    if !ENABLED {
+        return Err("this build has no release channel yet".to_owned());
+    }
     releases_from_json(&get_text(RELEASES_URL)?)
 }
 

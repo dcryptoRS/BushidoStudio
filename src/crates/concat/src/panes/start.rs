@@ -201,8 +201,13 @@ fn location_on(os: &str, desktop: Option<PathBuf>, home: impl Fn(&str) -> String
         "android" => home("Concat"),
         "ios" => home("Documents/Concat"),
         _ => desktop
-            .map(|desktop| desktop.join("Concat").to_string_lossy().into_owned())
-            .unwrap_or_else(|| home("Desktop/Concat")),
+            .map(|desktop| {
+                desktop
+                    .join(concat_host::dirs::PRODUCT)
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .unwrap_or_else(|| home(&format!("Desktop/{}", concat_host::dirs::PRODUCT))),
     }
 }
 
@@ -569,9 +574,12 @@ mod tests {
         assert_eq!(location_on("android", None, home), "/home/Concat");
         assert_eq!(
             PathBuf::from(location_on("macos", desktop(), home)),
-            Path::new("/desk").join("Concat")
+            Path::new("/desk").join("Bushido Studio")
         );
-        assert_eq!(location_on("linux", None, home), "/home/Desktop/Concat");
+        assert_eq!(
+            location_on("linux", None, home),
+            "/home/Desktop/Bushido Studio"
+        );
     }
 
     /// The next untitled name skips every folder already there, and starts

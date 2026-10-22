@@ -504,12 +504,12 @@ pub fn select_backend(
             .with_winit_window_attributes_hook(|attributes| attributes.with_decorations(false));
     }
     selector.select()?;
-    // The desktop entry's name (concat.desktop, in every Linux package and
+    // The desktop entry's name (bushido-studio.desktop, in every Linux package and
     // the flake), as the window's Wayland app_id and X11 class, so a dock
     // or a task switcher files the running window under the launcher it
     // came from - its icon, its pin - rather than as an unknown app. Slint
     // ignores it off Linux and the BSDs.
-    let _ = slint::set_xdg_app_id("concat");
+    let _ = slint::set_xdg_app_id("bushido-studio");
     Ok(gpu)
 }
 
@@ -522,13 +522,13 @@ pub fn select_backend(
 pub fn report_startup_failure(error: &str) {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        let mut description = format!("Concat could not start.\n\n{error}");
+        let mut description = format!("{} could not start.\n\n{error}", concat_host::dirs::PRODUCT);
         if let Some(path) = concat_host::logs::current() {
             description.push_str(&format!("\n\nLog: {}", path.display()));
         }
         rfd::MessageDialog::new()
             .set_level(rfd::MessageLevel::Error)
-            .set_title("Concat")
+            .set_title(concat_host::dirs::PRODUCT)
             .set_description(description)
             .set_buttons(rfd::MessageButtons::Ok)
             .show();

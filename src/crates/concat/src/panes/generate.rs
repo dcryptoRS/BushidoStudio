@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+// SPDX-FileCopyrightText: 2026 Royalty Studio
 
 //! Generate with AI (Royalty Studio fork): a clip or a picture made from a
 //! prompt by a service - Higgsfield (Seedance 2.5, Soul and the rest),

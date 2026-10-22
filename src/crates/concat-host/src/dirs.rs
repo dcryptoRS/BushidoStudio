@@ -21,8 +21,17 @@
 
 use std::path::{Path, PathBuf};
 
-/// The app identifier, which is also the folder name everywhere.
-pub const IDENTIFIER: &str = "app.concat.editor";
+/// The app identifier, which is also the folder name everywhere: Bushido
+/// Studio's own, so it and an installed Concat never share their settings.
+pub const IDENTIFIER: &str = "studio.bushido.editor";
+
+/// The name the program goes by in the window, the menus and its messages.
+pub const PRODUCT: &str = "Bushido Studio";
+
+/// Concat's identifier, whose folders the first run takes over from: see
+/// [`adopt_legacy`]. Bushido Studio is a modified Concat, and someone
+/// moving from it keeps their settings, keys and models.
+pub const LEGACY_IDENTIFIER: &str = "app.concat.editor";
 
 /// The app's own directories on this machine.
 #[derive(Clone, Debug)]
@@ -71,10 +80,13 @@ impl AppDirs {
                 Some(path) => path,
                 None => home()?.join(".local").join("share"),
             };
-            Ok(AppDirs {
+            let dirs = AppDirs {
                 config: config_base.join(IDENTIFIER),
                 data: data_base.join(IDENTIFIER),
-            })
+            };
+            adopt_legacy(&config_base.join(LEGACY_IDENTIFIER), &dirs.config, false);
+            adopt_legacy(&data_base.join(LEGACY_IDENTIFIER), &dirs.data, true);
+            Ok(dirs)
         }
     }
 
@@ -99,6 +111,45 @@ impl AppDirs {
             self.data.clone()
         }
     }
+}
+
+/// The first run's copy of Concat's folder `from` into `to`, when `to` is
+/// not there yet and `from` is: the settings copied, the data - models of
+/// gigabytes - hard-linked where the disk allows, so it takes no time and
+/// no room, and Concat's own folder is left as it was for Concat. Best
+/// effort: what will not copy is left behind, and the app starts anyway.
+fn adopt_legacy(from: &Path, to: &Path, link: bool) {
+    if to.exists() || !from.is_dir() {
+        return;
+    }
+    fn walk(from: &Path, to: &Path, link: bool) {
+        if std::fs::create_dir_all(to).is_err() {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(from) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let (source, target) = (entry.path(), to.join(entry.file_name()));
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                walk(&source, &target, link);
+            } else if kind.is_file() {
+                // A lock is the other program's, not ours to take.
+                if source.extension().is_some_and(|ext| ext == "lock") {
+                    continue;
+                }
+                let linked = link && std::fs::hard_link(&source, &target).is_ok();
+                if !linked {
+                    let _ = std::fs::copy(&source, &target);
+                }
+            }
+        }
+    }
+    log::info!("dirs: taking over {} as {}", from.display(), to.display());
+    walk(from, to, link);
 }
 
 /// The folders under `data`, each named where it is made: models, caches

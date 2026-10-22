@@ -1881,6 +1881,15 @@ export component SettingsDialog inherits Modal {
                         font-size: Theme.fs-lg;
                         font-weight: Theme.weight-title;
                     }
+
+                    // Where it comes from, as its licence and Concat's
+                    // trademark policy ask a modified version to say.
+                    Text {
+                        text: I18n.t("settings.basedOnConcat");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
                 }
 
                 // The block an issue report is opened with. Every line in it

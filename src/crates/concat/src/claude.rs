@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+// SPDX-FileCopyrightText: 2026 Royalty Studio
 
 //! The Claude pane (Royalty Studio fork): a conversation with Claude Code,
 //! run as a child process in stream-json mode for the life of the

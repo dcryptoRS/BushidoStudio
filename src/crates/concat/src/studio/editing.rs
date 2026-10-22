@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+// SPDX-FileCopyrightText: 2026 Royalty Studio
 
 //! The cutting room's verbs on the window (Royalty Studio fork): markers,
 //! the jump from cut to cut, in and out points, the three-point insert and
@@ -485,7 +486,11 @@ impl Studio {
         };
         // From the project as it is, not the echo: `project()` is the echo
         // while one is up, and each step of the drag would add to the last.
-        let Some(mut echo) = self.session.as_ref().map(|session| session.project().clone()) else {
+        let Some(mut echo) = self
+            .session
+            .as_ref()
+            .map(|session| session.project().clone())
+        else {
             return;
         };
         let mut mint = IdMint::default();

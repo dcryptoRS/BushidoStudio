@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+// SPDX-FileCopyrightText: 2026 Royalty Studio
 
 //! Generated media (Royalty Studio fork): a clip or a picture made by a
 //! service from a prompt - a clip from a frame of the timeline as well -
@@ -53,8 +54,17 @@ static KEPT: Mutex<Option<(Keys, Kept)>> = Mutex::new(None);
 /// What the keys' item in the keyring is found by.
 #[cfg(target_os = "linux")]
 fn keyring_attributes() -> std::collections::HashMap<&'static str, &'static str> {
+    keyring_attributes_of(crate::dirs::IDENTIFIER)
+}
+
+/// The keys' item as a build under `identifier` kept it: Bushido Studio's
+/// first run finds the ones kept before it was renamed.
+#[cfg(target_os = "linux")]
+fn keyring_attributes_of(
+    identifier: &'static str,
+) -> std::collections::HashMap<&'static str, &'static str> {
     std::collections::HashMap::from([
-        ("application", "app.concat.editor"),
+        ("application", identifier),
         ("kind", "generating-service-keys"),
     ])
 }
@@ -118,7 +128,18 @@ impl Keys {
                     return (keys, Kept::Keyring);
                 }
             }
-            Ok(None) => return (Keys::load_file(config), Kept::Keyring),
+            Ok(None) => {
+                // Kept before the rename, under Concat's identifier: read,
+                // and kept under this one at the next save.
+                let legacy =
+                    crate::secrets::load(&keyring_attributes_of(crate::dirs::LEGACY_IDENTIFIER));
+                if let Ok(Some(bytes)) = legacy
+                    && let Ok(keys) = serde_json::from_slice(&bytes)
+                {
+                    return (keys, Kept::Keyring);
+                }
+                return (Keys::load_file(config), Kept::Keyring);
+            }
             Err(error) => log::info!("keys: no keyring to keep them in ({error}), a file instead"),
         }
         (Keys::load_file(config), Kept::File)

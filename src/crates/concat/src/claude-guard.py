@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+# SPDX-FileCopyrightText: 2026 Royalty Studio
 """The Claude pane's guard (Royalty Studio fork): a PreToolUse hook for Claude
 Code, which runs in the pane with every permission. It refuses the few things
 that cannot be taken back - and is the one limit the agent there has.

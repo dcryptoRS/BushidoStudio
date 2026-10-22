@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+// SPDX-FileCopyrightText: 2026 Royalty Studio
 
 //! The editor's craft verbs (Royalty Studio fork): markers, the roll, the
 //! slip and the slide, the three-point insert and overwrite, and the lift.
