@@ -782,6 +782,7 @@ impl Api {
             bitrate_kbps: 0,
             color_range,
             hdr,
+            loudness: spec.loudness,
         };
 
         let project_path = session.path().to_owned();

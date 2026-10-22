@@ -326,6 +326,11 @@ pub struct ExportSpec {
     /// SDR timeline.
     #[serde(default)]
     pub hdr: Option<bool>,
+    /// The loudness the sound is brought to, in LUFS: -14 for Reels,
+    /// TikTok, Shorts and YouTube, -16 for podcasts, -23 for broadcast.
+    /// The mix as it is when absent (Royalty Studio fork).
+    #[serde(default)]
+    pub loudness: Option<f64>,
 }
 
 /// What a request hands back. Serialised as the payload alone: the variant

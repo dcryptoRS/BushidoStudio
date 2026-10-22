@@ -10,7 +10,7 @@
 
 use concat_project::Command;
 use concat_project::commands::{self, IdMint};
-use concat_project::model::{Clip, MarkerColor};
+use concat_project::model::{Clip, ClipKind, MarkerColor};
 
 use super::{Gesture, Studio};
 use crate::format::frames_timecode;
@@ -19,6 +19,13 @@ use crate::ui::{MarkerData, MarkerSheetData, TimelineTool};
 
 /// The fastest J or L goes, in times real time.
 const SHUTTLE_TOP: f32 = 8.0;
+
+/// How far music goes down under a voice, in dB: about 9, so it sits well
+/// under the words and is still heard.
+const DUCK_DEPTH: f64 = 9.0;
+
+/// The step the voice is listened for at, in seconds.
+const VOICE_STEP: f64 = 0.05;
 
 /// The colour a marker is drawn in.
 pub fn marker_tint(color: MarkerColor) -> slint::Color {
@@ -401,6 +408,112 @@ impl Studio {
     pub fn stop_shuttle(&mut self) {
         self.shuttle_rate = 0.0;
         self.shuttle_timer.stop();
+    }
+
+    // ── ducking ──
+
+    /// Duck under the voice, from a sound's menu: the sound right-clicked -
+    /// or the selection, when it is one of it - ridden down wherever the
+    /// rest of the sound on the timeline speaks, as volume keys that show
+    /// on the clip and can be moved.
+    pub fn duck_under_voice(&mut self, id: &str) {
+        let named = if self.selection.iter().any(|held| held == id) {
+            self.selection.clone()
+        } else {
+            vec![id.to_owned()]
+        };
+        let music: Vec<String> = named
+            .into_iter()
+            .filter(|id| {
+                self.clip(id)
+                    .is_some_and(|clip| clip.kind == ClipKind::Audio)
+            })
+            .collect();
+        if music.is_empty() {
+            self.notify(&t("duck.needSound"), false);
+            return;
+        }
+        let voices: Vec<Clip> = self
+            .timeline()
+            .clips
+            .iter()
+            .filter(|clip| {
+                self.clip_has_sound(clip)
+                    && !music.contains(&clip.id)
+                    && clip.muted != Some(true)
+                    && clip.volume > 0.0
+            })
+            .map(|clip| (**clip).clone())
+            .collect();
+        let mut ranges = Vec::new();
+        let mut unread = false;
+        for clip in &voices {
+            match self.speech_of(clip) {
+                Some(found) => ranges.extend(found),
+                None => unread = true,
+            }
+        }
+        if ranges.is_empty() {
+            let why = if unread {
+                t("duck.wavesNotReady")
+            } else {
+                t("duck.noVoice")
+            };
+            self.notify(&why, false);
+            return;
+        }
+        self.apply(Command::DuckClips {
+            clip_ids: music,
+            ranges,
+            depth: DUCK_DEPTH,
+            attack: 0.25,
+            release: 0.6,
+        });
+        self.notify(&tf("duck.done", &[&format!("{DUCK_DEPTH:.0}")]), false);
+    }
+
+    /// Where `clip` speaks, in timeline seconds, read off its waveform: the
+    /// stretches louder than a tenth of its loud parts (20 dB under them,
+    /// and never under -40 dBFS), gaps under 0.4 s closed and blips under
+    /// 0.15 s dropped. None while its waveform is not read yet.
+    fn speech_of(&self, clip: &Clip) -> Option<Vec<[f64; 2]>> {
+        let peaks = self
+            .peaks
+            .get(&super::art_key(&clip.media_id, clip.audio_stream))?;
+        let finest = peaks.finest();
+        let steps = (clip.duration / VOICE_STEP).floor() as usize;
+        let speed = clip.speed.max(1e-3);
+        let levels: Vec<f32> = (0..steps)
+            .map(|step| {
+                let from = clip.source_start + step as f64 * VOICE_STEP * speed;
+                let (low, high) = finest.extremes(from as f32, (from + VOICE_STEP * speed) as f32);
+                high.max(-low) * clip.volume as f32
+            })
+            .collect();
+        if levels.is_empty() {
+            return Some(Vec::new());
+        }
+        let mut sorted = levels.clone();
+        sorted.sort_by(f32::total_cmp);
+        let loud = sorted[((sorted.len() as f32 * 0.9) as usize).min(sorted.len() - 1)];
+        let threshold = (loud * 0.1).max(0.01);
+        let mut runs: Vec<(f64, f64)> = Vec::new();
+        for (step, level) in levels.iter().enumerate() {
+            if *level <= threshold {
+                continue;
+            }
+            let at = clip.start + step as f64 * VOICE_STEP;
+            match runs.last_mut() {
+                Some(last) if at - last.1 <= 0.4 => last.1 = at + VOICE_STEP,
+                _ => runs.push((at, at + VOICE_STEP)),
+            }
+        }
+        Some(
+            runs.into_iter()
+                .filter(|(start, end)| end - start >= 0.15)
+                .map(|(start, end)| [start, end])
+                .collect(),
+        )
     }
 
     // ── roll, slip and slide ──

@@ -96,6 +96,9 @@ pub struct Preferences {
     /// project is written by Save, closing with changes asks first, and a
     /// recovery copy keeps the changes if the window dies. `None` is on.
     pub autosave: Option<bool>,
+    /// The loudness exports are brought to, a row of the export sheet's
+    /// list (Royalty Studio fork); `None` is the mix as it is.
+    pub export_loudness: Option<usize>,
     /// Which scope the Scopes pane shows: 0 waveform, 1 parade, 2
     /// vectorscope, 3 histogram, 4 all four (Royalty Studio fork). `None`
     /// is the waveform.

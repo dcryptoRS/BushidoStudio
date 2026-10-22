@@ -383,11 +383,26 @@ pub fn mix_to_file_until(
     destination: &Path,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<()> {
+    mix_to_file_mastered(clips, duration, destination, cancel, "")
+}
+
+/// [`mix_to_file_until`], the whole mix run through `master` - FFmpeg audio
+/// filters, validated as a clip's chain is - on its way to the encoder:
+/// the gain and the limiter a delivery's loudness is brought to (Royalty
+/// Studio fork). Empty is the mix as it is.
+pub fn mix_to_file_mastered(
+    clips: &[AudioClip],
+    duration: f64,
+    destination: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+    master: &str,
+) -> Result<()> {
     ffi::init();
     // A bad chain is refused before any file is opened.
     for clip in clips {
         validate_chain(&clip.filter_chain)?;
     }
+    validate_chain(master)?;
     let missing = |name: &str| Error::Missing {
         what: "filter",
         name: name.to_owned(),
@@ -490,8 +505,13 @@ pub fn mix_to_file_until(
 
     // The plan's `[out]` lands on the encoder's own format before the sink.
     let graph_spec = mix_graph_from(clips, &leads)?;
+    let master = if master.trim().is_empty() {
+        String::new()
+    } else {
+        format!("{},", master.trim())
+    };
     let spec = format!(
-        "{graph_spec};[out]aformat=sample_fmts=fltp:sample_rates={MIX_RATE}:channel_layouts=stereo[sink]"
+        "{graph_spec};[out]{master}aformat=sample_fmts=fltp:sample_rates={MIX_RATE}:channel_layouts=stereo[sink]"
     );
     let mut parser = graph
         .input("sink", 0)

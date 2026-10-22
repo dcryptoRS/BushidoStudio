@@ -40,6 +40,11 @@ pub enum ExportMsg {
     HdrChanged(bool),
     /// The target bitrate field, in Mbps: the bitrate becomes a custom one.
     BitrateChanged(f32),
+    /// A delivery preset picked, by its row of [`PRESETS`] (Royalty Studio
+    /// fork).
+    PresetChosen(i32),
+    /// A loudness picked, by its row of [`LOUDNESS`].
+    LoudnessChanged(i32),
     /// Back to the form after a finished or failed render.
     Again,
     /// Pick the destination folder.
@@ -86,6 +91,11 @@ pub struct ExportPane {
     pub sdr: bool,
     /// The typed bitrate in kbps, the one written when `custom`.
     pub bitrate: u32,
+    /// The delivery preset, a row of [`PRESETS`]; 0 is none (Royalty
+    /// Studio fork).
+    pub preset: usize,
+    /// The loudness the sound is brought to, a row of [`LOUDNESS`].
+    pub loudness: usize,
     pub phase: ExportPhase,
     pub progress: f32,
     pub stage: String,
@@ -120,6 +130,8 @@ impl Default for ExportPane {
             ten_bit: false,
             sdr: false,
             bitrate: 8000,
+            preset: 0,
+            loudness: 0,
             phase: ExportPhase::Idle,
             progress: 0.0,
             stage: String::new(),
@@ -142,6 +154,13 @@ impl ExportPane {
                 self.open = true;
                 self.phase = ExportPhase::Idle;
                 self.message.clear();
+                // The loudness last asked for stays asked for (Royalty
+                // Studio fork): a reels editor normalises every export.
+                self.loudness = studio
+                    .prefs
+                    .export_loudness
+                    .unwrap_or(0)
+                    .min(LOUDNESS.len() - 1);
                 // The timeline's own size: the one rung that can be picked;
                 // and its own rate, first on the rate list.
                 self.resolution = Self::own_rung(studio);
@@ -151,6 +170,14 @@ impl ExportPane {
             ExportMsg::NameEdited(name) => self.name = name,
             ExportMsg::RateChanged(index) => {
                 self.rate = (index.max(0) as usize).min(Self::rates(studio).len() - 1);
+                self.preset = 0;
+            }
+            ExportMsg::PresetChosen(index) => self.choose_preset(studio, index),
+            ExportMsg::LoudnessChanged(index) => {
+                self.loudness = (index.max(0) as usize).min(LOUDNESS.len() - 1);
+                self.preset = 0;
+                studio.prefs.export_loudness = Some(self.loudness);
+                studio.prefs.save(&studio.host.dirs);
             }
             // A codec this device cannot encode is not taken: the picker
             // says so under it, and the choice before stands.
@@ -158,6 +185,7 @@ impl ExportPane {
                 let index = (index.max(0) as usize).min(concat_media::VideoCodec::ALL.len() - 1);
                 if concat_media::VideoCodec::ALL[index].encodable() {
                     self.codec = index;
+                    self.preset = 0;
                 }
             }
             ExportMsg::TenBitChanged(on) => self.ten_bit = on,
@@ -465,6 +493,7 @@ impl ExportPane {
             // Video range, what every player and every platform expects.
             color_range: ColorRange::Limited,
             hdr: self.hdr(studio),
+            loudness: self.loudness_target(),
         };
         let (frame_w, frame_h) = studio.output_size();
         let titles = studio
@@ -564,9 +593,9 @@ impl ExportPane {
                 format!("{}:{:02}", whole / 60, whole % 60).into()
             },
             contents: if titles > 0 {
-                format!("{clips} clips · {titles} titles")
+                tf("export.clipsAndTitles", &[&clips, &titles])
             } else {
-                format!("{clips} clips")
+                tf("export.clipsOnly", &[&clips])
             }
             .into(),
             resolution: self.resolution as i32,
@@ -662,7 +691,165 @@ impl ExportPane {
             message: self.message.as_str().into(),
             done_size: bytes(self.size_bytes(studio)).into(),
             empty: clips == 0,
+            preset: self.preset as i32,
+            presets: strings(PRESETS.iter().map(|preset| preset_name(preset.id))),
+            preset_details: strings(PRESETS.iter().map(|preset| preset_detail(preset.id))),
+            loudness: self.loudness as i32,
+            loudness_options: strings(LOUDNESS.iter().map(|(_, id)| loudness_name(id))),
+            preset_note: self.preset_note(studio).into(),
         }
+    }
+
+    /// The loudness a render is asked to bring its sound to, in LUFS.
+    pub fn loudness_target(&self) -> Option<f64> {
+        LOUDNESS.get(self.loudness).and_then(|(target, _)| *target)
+    }
+
+    /// A delivery preset picked: the rate, the codec and the loudness it
+    /// asks for. The size stays the timeline's - an edit exports at the
+    /// size it was cut at - and a note says when that is the wrong shape.
+    fn choose_preset(&mut self, studio: &mut Studio, index: i32) {
+        let index = (index.max(0) as usize).min(PRESETS.len() - 1);
+        self.preset = index;
+        let preset = &PRESETS[index];
+        if preset.id == "custom" {
+            return;
+        }
+        // H.264 plays everywhere a platform shows a video.
+        self.codec = 0;
+        self.ten_bit = false;
+        self.custom = false;
+        if let Some(target) = preset.loudness {
+            self.loudness = LOUDNESS
+                .iter()
+                .position(|(value, _)| *value == Some(target))
+                .unwrap_or(0);
+        } else {
+            self.loudness = 0;
+        }
+        // The rate: the timeline's own, unless the preset caps it and the
+        // timeline runs faster - Reels take 30 at most.
+        let rates = Self::rates(studio);
+        self.rate = match preset.max_fps {
+            Some(top) if crate::studio::fps_of(rates[0].0, rates[0].1) > top + 0.01 => rates
+                .iter()
+                .position(|&(num, den)| (crate::studio::fps_of(num, den) - top).abs() < 0.01)
+                .unwrap_or(0),
+            _ => 0,
+        };
+    }
+
+    /// What the preset and the timeline disagree about: Reels in a frame
+    /// that is not upright.
+    fn preset_note(&self, studio: &Studio) -> String {
+        let preset = &PRESETS[self.preset.min(PRESETS.len() - 1)];
+        let (width, height) = studio.output_size();
+        if preset.vertical && width >= height {
+            return t("export.presetNotVertical");
+        }
+        String::new()
+    }
+}
+
+/// A delivery preset (Royalty Studio fork): what a platform asks a file to
+/// be, as far as the sheet sets it.
+pub struct Preset {
+    /// Its name in the code; see [`preset_name`].
+    pub id: &'static str,
+    /// The integrated loudness, in LUFS, or none to leave the mix alone.
+    pub loudness: Option<f64>,
+    /// The highest rate the platform takes, when it has one.
+    pub max_fps: Option<f64>,
+    /// The platform shows the video upright.
+    pub vertical: bool,
+}
+
+/// The presets, in the order the sheet lists them; the first is none.
+pub const PRESETS: [Preset; 6] = [
+    Preset {
+        id: "custom",
+        loudness: None,
+        max_fps: None,
+        vertical: false,
+    },
+    Preset {
+        id: "reels",
+        loudness: Some(-14.0),
+        max_fps: Some(30.0),
+        vertical: true,
+    },
+    Preset {
+        id: "youtube",
+        loudness: Some(-14.0),
+        max_fps: Some(60.0),
+        vertical: false,
+    },
+    Preset {
+        id: "podcast",
+        loudness: Some(-16.0),
+        max_fps: None,
+        vertical: false,
+    },
+    Preset {
+        id: "broadcast",
+        loudness: Some(-23.0),
+        max_fps: None,
+        vertical: false,
+    },
+    Preset {
+        id: "master",
+        loudness: None,
+        max_fps: None,
+        vertical: false,
+    },
+];
+
+/// The loudness the sheet offers, with its name in the code.
+pub const LOUDNESS: [(Option<f64>, &str); 5] = [
+    (None, "mix"),
+    (Some(-14.0), "platforms"),
+    (Some(-16.0), "podcasts"),
+    (Some(-23.0), "ebu"),
+    (Some(-24.0), "atsc"),
+];
+
+fn strings(items: impl Iterator<Item = String>) -> slint::ModelRc<SharedString> {
+    let items: Vec<SharedString> = items.map(SharedString::from).collect();
+    ModelRc::from(std::rc::Rc::new(VecModel::from(items)))
+}
+
+/// A preset's name, in the person's language.
+fn preset_name(id: &str) -> String {
+    match id {
+        "reels" => t("export.presetReels"),
+        "youtube" => t("export.presetYoutube"),
+        "podcast" => t("export.presetPodcast"),
+        "broadcast" => t("export.presetBroadcast"),
+        "master" => t("export.presetMaster"),
+        _ => t("export.presetCustom"),
+    }
+}
+
+/// What a preset sets, under its name.
+fn preset_detail(id: &str) -> String {
+    match id {
+        "reels" => t("export.presetReelsDetail"),
+        "youtube" => t("export.presetYoutubeDetail"),
+        "podcast" => t("export.presetPodcastDetail"),
+        "broadcast" => t("export.presetBroadcastDetail"),
+        "master" => t("export.presetMasterDetail"),
+        _ => t("export.presetCustomDetail"),
+    }
+}
+
+/// A loudness, as the sheet names it.
+fn loudness_name(id: &str) -> String {
+    match id {
+        "platforms" => t("export.loudnessPlatforms"),
+        "podcasts" => t("export.loudnessPodcasts"),
+        "ebu" => t("export.loudnessEbu"),
+        "atsc" => t("export.loudnessAtsc"),
+        _ => t("export.loudnessMix"),
     }
 }
 

@@ -397,6 +397,11 @@ fn unity() -> f64 {
     1.0
 }
 
+/// The ceiling a normalised mix's samples are limited to: -1.5 dBFS, so the
+/// true peak - between the samples - stays under the -1 dBTP the platforms
+/// ask for (Royalty Studio fork).
+const LOUDNESS_CEILING: f64 = 0.841_395;
+
 /// Everything a full export needs: the destination, the output format, and
 /// the flattened clip list.
 #[derive(Deserialize)]
@@ -447,6 +452,11 @@ pub struct ExportRequest {
     /// say.
     #[serde(default)]
     pub hdr: bool,
+    /// The integrated loudness the sound is brought to, in LUFS - -14 for
+    /// the platforms, -23 for broadcast - its peaks held under -1.5 dBFS;
+    /// the mix as it is when absent (Royalty Studio fork).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loudness: Option<f64>,
     /// Original timeline origin when rendering a selection moved to zero.
     /// Preserves the global video frame grid and shader clock; audio, clip
     /// clocks and keyframe fractions keep their local timing.
@@ -1264,12 +1274,39 @@ pub fn render_on(
             reporter.cancelled()?;
             reporter.emit(0, total_frames, "mixing audio");
             let mix: Vec<AudioClip> = sound.iter().flat_map(|clip| audio_pieces(clip)).collect();
-            audio::mix_to_file_until(&mix, timeline_end, &mixed, reporter.cancel).map_err(
-                |error| match error {
-                    concat_media::Error::Cancelled => "export cancelled".to_owned(),
-                    error => error.to_string(),
-                },
-            )?;
+            let failed = |error: concat_media::Error| match error {
+                concat_media::Error::Cancelled => "export cancelled".to_owned(),
+                error => error.to_string(),
+            };
+            audio::mix_to_file_until(&mix, timeline_end, &mixed, reporter.cancel)
+                .map_err(failed)?;
+            // A loudness asked for (Royalty Studio fork): the mix measured,
+            // then mixed again through the gain that brings it there and a
+            // limiter that keeps its peaks under the ceiling - a linear
+            // normalisation, which leaves the mix's dynamics as they were.
+            if let Some(target) = request.loudness {
+                reporter.cancelled()?;
+                reporter.emit(0, total_frames, "mixing audio");
+                let measured =
+                    concat_media::loudness::measure(&mixed, reporter.cancel).map_err(failed)?;
+                if let Some(gain) = concat_media::loudness::gain_to(&measured, target) {
+                    let master =
+                        format!("volume={gain:.2}dB,alimiter=limit={LOUDNESS_CEILING:.4}:level=0");
+                    audio::mix_to_file_mastered(
+                        &mix,
+                        timeline_end,
+                        &mixed,
+                        reporter.cancel,
+                        &master,
+                    )
+                    .map_err(failed)?;
+                    log::info!(
+                        "export: the mix measured {:.1} LUFS (peak {:.1} dBFS), brought to {target:.1}",
+                        measured.integrated,
+                        measured.peak
+                    );
+                }
+            }
 
             reporter.cancelled()?;
             reporter.emit(total_frames, total_frames, "muxing");
@@ -2461,6 +2498,7 @@ pub fn preview_plan(
         color_range: concat_media::ColorRange::Limited,
         color_space,
         hdr: false,
+        loudness: None,
         effect_time_offset: 0.0,
         clips: Vec::new(),
     };
@@ -3208,6 +3246,7 @@ mod tests {
             color_range: concat_media::ColorRange::Limited,
             color_space: ColorSpace::Sdr,
             hdr: false,
+            loudness: None,
             effect_time_offset: 0.0,
             clips: vec![footage],
         };
@@ -3289,6 +3328,7 @@ mod tests {
             color_range: concat_media::ColorRange::Limited,
             color_space: ColorSpace::Sdr,
             hdr: false,
+            loudness: None,
             effect_time_offset: 0.0,
             clips: vec![footage],
         };

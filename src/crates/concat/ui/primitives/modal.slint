@@ -670,7 +670,8 @@ export component DialogRow inherits HorizontalLayout {
     spacing: 10px;
 
     if root.label != "": Text {
-        width: 78px;
+        // Room for a label in Spanish or German, not only in English.
+        width: 104px;
         text: root.label;
         color: Theme.fg-muted;
         font-size: Theme.fs;

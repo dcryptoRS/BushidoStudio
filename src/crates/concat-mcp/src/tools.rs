@@ -426,7 +426,7 @@ pub fn catalogue() -> Vec<Tool> {
         method(
             "export_start",
             "Start an export",
-            "Starts rendering an open project's active timeline to `output` (an .mp4 path), as the window's Export does. Returns at once with a `job` id; follow it with `export_wait` or `export_status`. Optional: crf (quality, lower is better, 20 by default), preset (x264 speed, \"medium\"), width/height, rateNum/rateDen, codec (\"h264\", \"hevc\" or \"av1\"), tenBit, colorRange, hdr. One export runs at a time; another is refused as busy.",
+            "Starts rendering an open project's active timeline to `output` (an .mp4 path), as the window's Export does. Returns at once with a `job` id; follow it with `export_wait` or `export_status`. Optional: crf (quality, lower is better, 20 by default), preset (x264 speed, \"medium\"), width/height, rateNum/rateDen, codec (\"h264\", \"hevc\" or \"av1\"), tenBit, colorRange, hdr. `loudness` (LUFS: -14 for Reels, TikTok, Shorts and YouTube, -16 for podcasts, -23 for broadcast) measures the mix by EBU R128 and normalises it. One export runs at a time; another is refused as busy.",
             "export.run",
             Raw,
         ),

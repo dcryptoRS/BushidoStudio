@@ -45,6 +45,9 @@ pub struct ExportSpec {
     /// An HDR timeline written as HDR, its own HLG or PQ, rather than
     /// tone-mapped to SDR. Nothing for an SDR timeline.
     pub hdr: bool,
+    /// The loudness the sound is brought to, in LUFS; the mix as it is
+    /// when absent (Royalty Studio fork).
+    pub loudness: Option<f64>,
 }
 
 /// One progress report: which frame of how many, in which stage.
@@ -78,6 +81,7 @@ pub fn request(session: &Session, spec: &ExportSpec, titles: Vec<ExportClip>) ->
         color_range: spec.color_range,
         color_space: session.video().color_space,
         hdr: spec.hdr,
+        loudness: spec.loudness,
         effect_time_offset: 0.0,
         clips,
     }

@@ -117,6 +117,15 @@ pub(super) fn apply(
         Command::SlideClip { clip_id, delta } => {
             slide(project, &clip_id, delta, scope).map(applied)
         }
+        Command::DuckClips {
+            clip_ids,
+            ranges,
+            depth,
+            attack,
+            release,
+        } => Ok(applied(duck(
+            project, &clip_ids, &ranges, depth, attack, release,
+        ))),
         _ => unreachable!("commands::apply routes only this module's commands here"),
     }
 }
@@ -359,6 +368,94 @@ fn slide(project: &mut Project, id: &str, delta: f64, scope: Scope) -> Result<bo
         }
     }
     Ok(true)
+}
+
+/// [`Command::DuckClips`]: each clip's volume ridden down under the
+/// stretches, as keys at the clip's own fractions. Whether any clip moved.
+fn duck(
+    project: &mut Project,
+    clip_ids: &[String],
+    ranges: &[[f64; 2]],
+    depth: f64,
+    attack: f64,
+    release: f64,
+) -> bool {
+    let (attack, release) = (attack.max(0.0), release.max(0.0));
+    let factor = 10f64.powf(-depth.clamp(0.0, 60.0) / 20.0);
+    // In time order, the stretches the ride would run into each other
+    // between joined into one.
+    let mut spans: Vec<(f64, f64)> = ranges
+        .iter()
+        .map(|[a, b]| (a.min(*b), a.max(*b)))
+        .filter(|(a, b)| b - a > 1e-3)
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut joined: Vec<(f64, f64)> = Vec::new();
+    for (start, end) in spans {
+        match joined.last_mut() {
+            Some(last) if start - last.1 <= attack + release => last.1 = last.1.max(end),
+            _ => joined.push((start, end)),
+        }
+    }
+    let timeline = project.active_mut();
+    let mut changed = false;
+    for id in clip_ids {
+        let Some(clip) = timeline.clip_mut(id) else {
+            continue;
+        };
+        let (start, length) = (clip.start, clip.duration);
+        if length <= 0.0 {
+            continue;
+        }
+        let end = start + length;
+        let full = clip.volume;
+        let low = full * factor;
+        // The ride as points in timeline seconds, full between stretches.
+        let points: Vec<(f64, f64)> = joined
+            .iter()
+            .filter(|(a, b)| *b + release > start && *a - attack < end)
+            .flat_map(|&(a, b)| [(a - attack, full), (a, low), (b, low), (b + release, full)])
+            .collect();
+        if points.is_empty() {
+            continue;
+        }
+        let value_at = |t: f64| {
+            if t <= points[0].0 {
+                return points[0].1;
+            }
+            for pair in points.windows(2) {
+                let ((t0, v0), (t1, v1)) = (pair[0], pair[1]);
+                if t <= t1 {
+                    return if t1 - t0 <= 1e-9 {
+                        v1
+                    } else {
+                        v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+                    };
+                }
+            }
+            points[points.len() - 1].1
+        };
+        let mut keys: Vec<(f64, f64)> = vec![(0.0, value_at(start))];
+        for &(t, value) in &points {
+            if t > start && t < end {
+                keys.push(((t - start) / length, value));
+            }
+        }
+        keys.push((1.0, value_at(end)));
+        // Keys too near each other to tell apart are one.
+        keys.dedup_by(|b, a| (b.0 - a.0).abs() < crate::model::KEY_EPSILON);
+        clip.keys.retain(|key| key.property != KeyProperty::Volume);
+        clip.keys
+            .extend(keys.into_iter().map(|(at, value)| crate::model::ClipKey {
+                property: KeyProperty::Volume,
+                at,
+                value,
+                ease: KeyEase::default(),
+            }));
+        clip.sort_keys();
+        changed = true;
+    }
+    changed
 }
 
 /// Clears `start..end` on `lanes`: every clip across either end is cut
@@ -814,6 +911,91 @@ mod tests {
         let mut fresh = IdMint::default();
         fresh.adopt_project(editor.project());
         assert_ne!(fresh.next("k"), early);
+    }
+
+    /// The volume a clip's keys give at `fraction` of it.
+    fn volume_at(clip: &Clip, fraction: f64) -> f64 {
+        let keys: Vec<_> = clip
+            .keys
+            .iter()
+            .filter(|key| key.property == KeyProperty::Volume)
+            .collect();
+        let first = keys.first().expect("volume keys");
+        if fraction <= first.at {
+            return first.value;
+        }
+        for pair in keys.windows(2) {
+            if fraction <= pair[1].at {
+                let span = pair[1].at - pair[0].at;
+                return pair[0].value
+                    + (pair[1].value - pair[0].value) * (fraction - pair[0].at) / span;
+            }
+        }
+        keys[keys.len() - 1].value
+    }
+
+    #[test]
+    fn music_is_ducked_under_the_voice_and_comes_back() {
+        let (mut editor, media) = editor();
+        // Ten seconds of music; the voice at 2-4 s and 4.5-6 s, which the
+        // ride joins, and at 8.5-12 s, past the clip's end.
+        let music = place_at(&mut editor, &media, 0.0, (0.0, 10.0), false);
+        let sound = sound_of(&editor, &music).id;
+        run(
+            &mut editor,
+            Command::DuckClips {
+                clip_ids: vec![sound.clone()],
+                ranges: vec![[2.0, 4.0], [4.5, 6.0], [8.5, 12.0]],
+                depth: 12.0,
+                attack: 0.25,
+                release: 0.5,
+            },
+        );
+        let clip = clip(&editor, &sound);
+        let low = 10f64.powf(-12.0 / 20.0);
+        assert!((volume_at(&clip, 0.0) - 1.0).abs() < 1e-9);
+        assert!(
+            (volume_at(&clip, 0.3) - low).abs() < 1e-6,
+            "under the voice"
+        );
+        assert!(
+            (volume_at(&clip, 0.42) - low).abs() < 1e-6,
+            "the gap is joined"
+        );
+        assert!(
+            (volume_at(&clip, 0.75) - 1.0).abs() < 1e-6,
+            "back up between"
+        );
+        assert!(
+            (volume_at(&clip, 1.0) - low).abs() < 1e-6,
+            "ducked to its end"
+        );
+        // The picture is not ducked: only the clip named is.
+        let video = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|c| c.kind == ClipKind::Video)
+            .cloned()
+            .expect("the picture");
+        assert!(
+            video
+                .keys
+                .iter()
+                .all(|key| key.property != KeyProperty::Volume)
+        );
+        // Nothing to duck under: the clip is left alone.
+        let unchanged = editor
+            .apply(Command::DuckClips {
+                clip_ids: vec![sound],
+                ranges: vec![[30.0, 31.0]],
+                depth: 9.0,
+                attack: 0.25,
+                release: 0.6,
+            })
+            .expect("applies");
+        assert!(!unchanged.applied);
     }
 
     #[test]

@@ -128,14 +128,19 @@ grade everything beneath them; masks to isolate.
 - Dialogue is the priority: clear, consistent level, no clipping. Clean it
   before effects (noise, rumble), then even it out.
 - Music under speech sits about 6–8 dB below the voice; duck it where the
-  voice speaks and let it rise in the gaps.
+  voice speaks and let it rise in the gaps. `edit_apply` with
+  `{"op": "duckClips", "clipIds": [music], "ranges": [[start, end], ...]}`
+  rides it down by `depth` dB (9 if not given) under each stretch, as
+  volume keys; take the stretches from the transcript's words.
 - Fade music in briefly (about 0.3 s) and out with a longer tail (about
   1.5 s); never let a clip start or stop with an audible click.
 - Effects mark visual beats: on the frame for hits and clicks, a frame or
   two early for whooshes, a frame or two late for impacts. Fewer, well
   placed effects beat many.
 - Deliver for social platforms at about −14 LUFS integrated with true peaks
-  at or below −1 dBTP; broadcast usually asks for −23 LUFS.
+  at or below −1 dBTP; broadcast usually asks for −23 LUFS. `export_start`
+  takes `"loudness": -14` and measures the mix by EBU R128 and normalises
+  it, its peaks limited.
 - A picture and its sound are linked; to build J- and L-cuts or to keep a
   sound alone, unlink them first.
 

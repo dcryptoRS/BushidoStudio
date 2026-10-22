@@ -1909,6 +1909,14 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_export_name_edited(on_window!(|state, name: SharedString| {
         state.handle(Msg::Export(ExportMsg::NameEdited(name.to_string())));
     }));
+    app.on_export_delivery_changed(on_window!(|state, which: i32, index: i32| {
+        let msg = if which == 0 {
+            ExportMsg::PresetChosen(index)
+        } else {
+            ExportMsg::LoudnessChanged(index)
+        };
+        state.handle(Msg::Export(msg));
+    }));
     app.on_export_rate_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Export(ExportMsg::RateChanged(index)));
     }));

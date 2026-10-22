@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+// SPDX-FileCopyrightText: 2026 Royalty Studio
 
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
@@ -17,11 +18,13 @@ import { Fmt } from "../util.slint";
 // starts. What the file will weigh is on the Export button, because that is
 // the thing the bitrate decides.
 //
-// It covers the window and slides up from the bottom edge, and its groups
-// are laid out across the width rather than down it: three columns on a
-// laptop, two on a narrow window, and one that scrolls on a phone held
-// upright. The footer - the Export button, the progress, the result -
-// stays pinned under them whatever the body is doing.
+// On a desk it is a card in the middle of the window, as tall as what it
+// holds, over the editor dimmed, in two columns (Royalty Studio fork); on a
+// phone, or a window too narrow for that, it covers the window. Either way
+// it slides up from the bottom edge, and its groups are laid out across the
+// width rather than down it: two columns, three on a tablet's sheet, and one
+// that scrolls on a phone held upright. The footer - the Export button, the
+// progress, the result - stays pinned under them whatever the body is doing.
 
 export enum ExportPhase { idle, running, done, failed }
 
@@ -80,6 +83,16 @@ export struct ExportData {
     done-size: string,
     /// nothing on the timeline to export
     empty: bool,
+    /// Delivery (Royalty Studio fork): the preset picked, the presets with
+    /// what each sets, the loudness the sound is brought to, and a note
+    /// when the preset and the timeline disagree - a horizontal timeline
+    /// for Reels.
+    preset: int,
+    presets: [string],
+    preset-details: [string],
+    loudness: int,
+    loudness-options: [string],
+    preset-note: string,
 }
 
 // One tile of the summary block.
@@ -275,8 +288,31 @@ component OutputSection inherits DialogSection {
     callback codec-changed(index: int);
     callback ten-bit-changed(on: bool);
     callback hdr-changed(on: bool);
+    /// A delivery preset (0) or a loudness (1) picked, by its row.
+    callback delivery-changed(which: int, index: int);
 
     title: I18n.t("export.output");
+
+    // What it is for (Royalty Studio fork): a preset sets the rate, the
+    // codec and the loudness a platform asks for.
+    DialogRow {
+        label: I18n.t("export.preset");
+        Select {
+            property <int> wanted: root.data.preset;
+            changed wanted => { self.current = self.wanted; }
+            current: root.data.preset;
+            options: root.data.presets;
+            details: root.data.preset-details;
+            changed(index) => { root.delivery-changed(0, index); }
+        }
+    }
+
+    if root.data.preset-note != "": Text {
+        text: root.data.preset-note;
+        color: Theme.danger;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
+    }
 
     DialogRow {
         label: I18n.t("export.resolution");
@@ -388,6 +424,19 @@ component OutputSection inherits DialogSection {
                 unit: "Mbps";
                 changed(value) => { root.bitrate-changed(value); }
             }
+        }
+    }
+
+    // The loudness the sound is brought to (Royalty Studio fork): the mix
+    // measured by EBU R128 and normalised, its peaks held under -1 dBTP.
+    DialogRow {
+        label: I18n.t("export.loudness");
+        Select {
+            property <int> wanted: root.data.loudness;
+            changed wanted => { self.current = self.wanted; }
+            current: root.data.loudness;
+            options: root.data.loudness-options;
+            changed(index) => { root.delivery-changed(1, index); }
         }
     }
 
@@ -592,16 +641,28 @@ export component ExportDialog inherits Rectangle {
     callback ten-bit-changed(on: bool);
     callback hdr-changed(on: bool);
     callback bitrate-changed(mbps: float);
+    callback delivery-changed(which: int, index: int);
     callback begin();
     callback cancel();
     callback reveal();
     callback again();
 
     property <bool> running: root.data.phase == ExportPhase.running;
+    /// On a desk, a card in the middle of the window as tall as what it
+    /// holds, over the editor dimmed, rather than a sheet the size of the
+    /// window with a third of it empty (Royalty Studio fork). A phone, and
+    /// a window too narrow for the card, keep the sheet.
+    property <bool> card: !root.phone && root.width >= 800px;
+    property <length> card-w: Math.min(880px, root.width - 48px);
+    property <length> card-h: Math.min(
+        52px + groups.content-height + 1px + foot.preferred-height,
+        root.height - 48px);
+    property <length> card-y: (root.height - root.card-h) / 2;
     /// How many columns the width holds. Three groups a column wide need
     /// about 330px each; under two of those the sheet is a phone's single
-    /// column and scrolls.
-    property <int> columns: root.width >= 1080px ? 3 : root.width >= 720px ? 2 : 1;
+    /// column and scrolls. The card is always two.
+    property <int> columns: root.card ? 2
+        : root.width >= 1080px ? 3 : root.width >= 720px ? 2 : 1;
 
     /// How far down the sheet is, as a share of the window: 0 up, 1 gone.
     /// A share rather than a length, so a window resized while the sheet is
@@ -615,12 +676,37 @@ export component ExportDialog inherits Rectangle {
     // the way out is seen as well as the way in.
     visible: root.data.open || root.lowered < 1;
 
+    // The editor dimmed under the card. A press beside it closes it, as
+    // beside every other sheet - not while a job runs, which has no safe
+    // answer to that.
+    if root.card: Rectangle {
+        background: Theme.overlay;
+        opacity: 1 - root.lowered;
+
+        TouchArea {
+            clicked => {
+                if (!root.running) {
+                    root.closed();
+                }
+            }
+        }
+    }
+
     sheet := Rectangle {
-        x: 0;
-        y: root.height * root.lowered;
-        width: root.width;
-        height: root.height;
+        x: root.card ? (root.width - root.card-w) / 2 : 0;
+        y: root.card ? root.card-y + (root.height - root.card-y) * root.lowered
+            : root.height * root.lowered;
+        width: root.card ? root.card-w : root.width;
+        height: root.card ? root.card-h : root.height;
         background: Theme.panel;
+        // A hairline and a deep soft shadow, as the other sheets have.
+        border-width: root.card ? 1px : 0px;
+        border-color: Theme.line;
+        border-radius: root.card ? Theme.r-xl : 0px;
+        drop-shadow-blur: root.card ? 32px : 0px;
+        drop-shadow-offset-y: root.card ? 10px : 0px;
+        drop-shadow-color: root.card ? #00000073 : Colors.transparent;
+        clip: true;
 
         // Nothing under the sheet takes a press while it is up.
         TouchArea { }
@@ -705,7 +791,7 @@ export component ExportDialog inherits Rectangle {
             }
 
             // ── the groups ───────────────────────────────────────────────
-            PaneScroll {
+            groups := PaneScroll {
                 vertical-stretch: 1;
                 finger: root.phone;
 
@@ -728,11 +814,14 @@ export component ExportDialog inherits Rectangle {
                             codec-changed(index) => { root.codec-changed(index); }
                             ten-bit-changed(on) => { root.ten-bit-changed(on); }
                             hdr-changed(on) => { root.hdr-changed(on); }
+                            delivery-changed(which, index) => { root.delivery-changed(which, index); }
                         }
                     }
 
-                    // Two columns: the picture, what it is and where it
-                    // goes on the left; how it is written on the right.
+                    // Two columns: the picture and what it is on the left;
+                    // how it is written and where it goes on the right -
+                    // the two about as tall as each other, so neither
+                    // leaves a hole under it.
                     if !root.running && root.columns == 2: HorizontalLayout {
                         spacing: 12px;
 
@@ -748,12 +837,6 @@ export component ExportDialog inherits Rectangle {
                                 seek(seconds) => { root.seek(seconds); }
                             }
                             SummarySection { data: root.data; }
-                            DestinationSection {
-                                data: root.data;
-                                phone: root.phone;
-                                name-edited(name) => { root.name-edited(name); }
-                                browse => { root.browse(); }
-                            }
                         }
 
                         VerticalLayout {
@@ -767,6 +850,13 @@ export component ExportDialog inherits Rectangle {
                                 codec-changed(index) => { root.codec-changed(index); }
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
+                                delivery-changed(which, index) => { root.delivery-changed(which, index); }
+                            }
+                            DestinationSection {
+                                data: root.data;
+                                phone: root.phone;
+                                name-edited(name) => { root.name-edited(name); }
+                                browse => { root.browse(); }
                             }
                         }
                     }
@@ -801,6 +891,7 @@ export component ExportDialog inherits Rectangle {
                                 codec-changed(index) => { root.codec-changed(index); }
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
+                                delivery-changed(which, index) => { root.delivery-changed(which, index); }
                             }
                         }
 
@@ -826,7 +917,7 @@ export component ExportDialog inherits Rectangle {
             }
 
             // The groups pad themselves; the footer is padded to match.
-            Measure {
+            foot := Measure {
                 padding: 14px;
 
                 ExportFooter {

@@ -11956,6 +11956,15 @@ impl Studio {
                 "",
                 self.clip_has_sound(clip),
             ));
+            // The music under the voice: ridden down wherever the rest of
+            // the sound speaks (Royalty Studio fork).
+            rows.push(action(
+                "duck",
+                t("duck.title"),
+                Glyph::Volume,
+                "",
+                clip.kind == model::ClipKind::Audio,
+            ));
             rows.push(rule());
         }
         let audible = clip.kind != model::ClipKind::Image;
@@ -12688,6 +12697,7 @@ impl Studio {
                 self.split_at(at, true);
             }
             "freeze" => self.freeze_at_playhead(),
+            "duck" => self.duck_under_voice(id),
             // The clip right-clicked, or the selection when it is one of
             // it, as Delete takes it.
             "delete-left" | "delete-right" => {

@@ -155,6 +155,7 @@ impl Consolidation {
             color_range: Default::default(),
             color_space: self.video.color_space,
             hdr,
+            loudness: None,
             effect_time_offset: start,
             clips,
         }

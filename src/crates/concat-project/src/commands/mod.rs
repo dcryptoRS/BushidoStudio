@@ -798,6 +798,28 @@ pub enum Command {
         /// Seconds along the timeline; positive is later.
         delta: f64,
     },
+    /// Ducks the named clips under a voice (Royalty Studio fork): their
+    /// volume ridden down by `depth` dB wherever `ranges` say the voice
+    /// speaks - from `attack` seconds before each stretch, and back up over
+    /// `release` seconds after it - as volume keys that show on the clip
+    /// and can be moved. Stretches nearer each other than the ride takes
+    /// are joined, and a clip's own volume keys are replaced; a clip no
+    /// stretch reaches is left alone.
+    DuckClips {
+        /// The clips to duck: the music.
+        clip_ids: Vec<String>,
+        /// Where the voice speaks, as `[start, end]` in timeline seconds.
+        ranges: Vec<[f64; 2]>,
+        /// How far down, in dB: about 9 under speech.
+        #[serde(default = "duck_depth")]
+        depth: f64,
+        /// Seconds the ride down starts before the voice.
+        #[serde(default = "duck_attack")]
+        attack: f64,
+        /// Seconds the ride back up takes after it.
+        #[serde(default = "duck_release")]
+        release: f64,
+    },
     /// Marks a moment on the active timeline (Royalty Studio fork), minting
     /// a "k" id. Returns it.
     AddMarker {
@@ -1228,6 +1250,13 @@ impl Command {
             | Command::SlipClip { delta, .. }
             | Command::SlideClip { delta, .. } => bad([*delta]),
             Command::AddMarker { time, .. } => bad([*time]),
+            Command::DuckClips {
+                ranges,
+                depth,
+                attack,
+                release,
+                ..
+            } => bad(ranges.iter().flatten().copied()) || bad([*depth, *attack, *release]),
             Command::UpdateMarker { time, .. } => bad(*time),
             Command::AddMedia { item }
             | Command::FillSlot { item, .. }
@@ -1380,6 +1409,21 @@ fn assign<T: PartialEq>(slot: &mut T, value: T) -> bool {
     }
 }
 
+/// [`Command::DuckClips`]' depth when a caller gives none, in dB.
+fn duck_depth() -> f64 {
+    9.0
+}
+
+/// Its ride down, in seconds before the voice.
+fn duck_attack() -> f64 {
+    0.25
+}
+
+/// Its ride back up, in seconds after the voice.
+fn duck_release() -> f64 {
+    0.6
+}
+
 /// Applies one command. Errors are [`CommandError`]s, each rendering as a
 /// user-meaningful sentence; a command that legitimately does nothing (a
 /// no-op rename, an out-of-range split) returns Ok with no created id and
@@ -1477,6 +1521,7 @@ fn apply_in(
         | Command::SlipClip { .. }
         | Command::SlideClip { .. }
         | Command::AddMarker { .. }
+        | Command::DuckClips { .. }
         | Command::UpdateMarker { .. }
         | Command::RemoveMarkers { .. }) => editing::apply(project, mint, command, scope),
         command @ (Command::LinkClips { .. } | Command::UnlinkClips { .. }) => {
