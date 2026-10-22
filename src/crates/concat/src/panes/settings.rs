@@ -17,6 +17,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use concat_host::genai::Keys;
 use concat_host::models::SourcePreference;
 use concat_host::updates::{self, Fixed, Installed, Release, Standing, Version};
 use slint::{ModelRc, SharedString, VecModel};
@@ -29,7 +30,7 @@ use crate::panes::Msg;
 use crate::platform;
 use crate::prefs;
 use crate::studio::Studio;
-use crate::ui::{ModelData, SettingsData, ShortcutData};
+use crate::ui::{AssistantData, ModelData, SettingsData, ShortcutData};
 
 /// Everything that can happen to the settings sheet.
 #[derive(Clone, Debug)]
@@ -62,6 +63,20 @@ pub enum SettingsMsg {
     GpuChanged(bool),
     /// The magnetic timeline switch; the tray's button is the same fact.
     MagneticChanged(bool),
+    /// Whether a video's sound goes on a sound lane of its own (Royalty
+    /// Studio fork).
+    SplitAudioChanged(bool),
+    /// Whether linked clips are taken along; the tray's button is the same
+    /// fact (Royalty Studio fork).
+    LinkedSelectionChanged(bool),
+    /// Whether every change is saved as it is made (Royalty Studio fork).
+    AutosaveChanged(bool),
+    /// A field of the Assistant and AI page, by the name the page gives
+    /// it, and what it holds now (Royalty Studio fork).
+    AssistantEdited {
+        field: String,
+        text: String,
+    },
     DownloadSourceChanged(i32),
     DownloadBaseEdited(String),
     ServerEnabledChanged(bool),
@@ -114,6 +129,9 @@ pub enum SettingsMsg {
 
 /// The Version page's index in the column of pages.
 const VERSION_PAGE: i32 = 6;
+/// The Assistant and AI page (Royalty Studio fork): the keys and the
+/// models of the services that make clips and pictures.
+pub const ASSISTANT_PAGE: i32 = 8;
 /// The Shortcuts page's index, which the launch screen's Keyboard
 /// shortcuts card opens the sheet on.
 pub const SHORTCUTS_PAGE: i32 = 7;
@@ -214,6 +232,9 @@ pub struct SettingsPane {
     install: Option<(f32, f32)>,
     /// The running switch's stop flag.
     install_cancel: Arc<AtomicBool>,
+    /// The generating services' keys, as the Assistant and AI page shows
+    /// and edits them; read from their own file when the sheet opens.
+    pub keys: Keys,
 }
 
 impl SettingsPane {
@@ -239,9 +260,11 @@ impl SettingsPane {
                 self.download_base = studio.prefs.download_base.clone().unwrap_or_default();
                 Self::apply_download_source(studio);
                 self.apply_server(studio);
+                crate::claude::set_studio_server(studio.prefs.assistant.studio.as_deref());
                 self.refresh(studio);
             }
             SettingsMsg::Open => {
+                self.keys = Keys::load(&studio.host.dirs.config);
                 self.refresh(studio);
                 self.open = true;
             }
@@ -334,6 +357,26 @@ impl SettingsPane {
             SettingsMsg::MagneticChanged(on) => {
                 studio.prefs.magnetic = on;
                 studio.prefs.save(&studio.host.dirs);
+            }
+            SettingsMsg::SplitAudioChanged(on) => {
+                studio.prefs.split_audio = Some(on);
+                studio.prefs.save(&studio.host.dirs);
+            }
+            SettingsMsg::LinkedSelectionChanged(on) => {
+                studio.prefs.linked_selection = Some(on);
+                studio.prefs.save(&studio.host.dirs);
+            }
+            SettingsMsg::AutosaveChanged(on) => {
+                studio.prefs.autosave = Some(on);
+                studio.prefs.save(&studio.host.dirs);
+                // Back on with changes waiting: they are saved now, as
+                // they would have been.
+                if on && studio.dirty {
+                    studio.save(false);
+                }
+            }
+            SettingsMsg::AssistantEdited { field, text } => {
+                self.assistant_edited(studio, &field, text);
             }
             SettingsMsg::DownloadSourceChanged(index) => {
                 let index = (index.max(0) as usize).min(SourcePreference::ALL.len() - 1);
@@ -838,8 +881,75 @@ impl SettingsPane {
     }
 
     /// The sheet as Slint shows it.
+    /// One field of the Assistant and AI page put where it is kept: the
+    /// preferences, or the keys' own file.
+    fn assistant_edited(&mut self, studio: &mut Studio, field: &str, text: String) {
+        // A key: into the keyring (or its file), not the preferences.
+        let key = match field {
+            "higgsfield-id" => Some(&mut self.keys.higgsfield_id),
+            "higgsfield-secret" => Some(&mut self.keys.higgsfield_secret),
+            "seedance" => Some(&mut self.keys.seedance),
+            "gemini" => Some(&mut self.keys.gemini),
+            _ => None,
+        };
+        if let Some(key) = key {
+            *key = text;
+            if let Err(error) = self.keys.save(&studio.host.dirs.config) {
+                studio.notify(&error, true);
+            }
+            return;
+        }
+        let assistant = &mut studio.prefs.assistant;
+        let models = &mut assistant.models;
+        match field {
+            "name" => assistant.name = text,
+            "footage" => assistant.footage = prefs::AssistantPrefs::lines(&text),
+            "protected" => assistant.protected = prefs::AssistantPrefs::lines(&text),
+            "studio" => {
+                let path = text.trim();
+                crate::claude::set_studio_server(Some(path));
+                assistant.studio = (!path.is_empty()).then(|| path.to_owned());
+            }
+            "higgsfield-video" => models.higgsfield_video = text,
+            "higgsfield-image" => models.higgsfield_image = text,
+            "seedance-model" => models.seedance = text,
+            "seedance-base" => models.seedance_base = text,
+            "gemini-model" => models.gemini_image = text,
+            _ => return,
+        }
+        studio.prefs.save(&studio.host.dirs);
+    }
+
+    /// The Assistant and AI page's fields, as they are kept.
+    fn assistant_data(&self, studio: &Studio) -> AssistantData {
+        let assistant = &studio.prefs.assistant;
+        let models = &assistant.models;
+        let (_, kept) = Keys::loaded(&studio.host.dirs.config);
+        AssistantData {
+            keyring: kept == concat_host::genai::Kept::Keyring,
+            name: assistant.name.as_str().into(),
+            footage: assistant.footage.join("\n").into(),
+            protected: assistant.protected.join("\n").into(),
+            studio: assistant.studio.clone().unwrap_or_default().into(),
+            studio_found: crate::claude::studio_server()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default()
+                .into(),
+            higgsfield_id: self.keys.higgsfield_id.as_str().into(),
+            higgsfield_secret: self.keys.higgsfield_secret.as_str().into(),
+            seedance: self.keys.seedance.as_str().into(),
+            gemini: self.keys.gemini.as_str().into(),
+            higgsfield_video: models.higgsfield_video.as_str().into(),
+            higgsfield_image: models.higgsfield_image.as_str().into(),
+            seedance_model: models.seedance.as_str().into(),
+            seedance_base: models.seedance_base.as_str().into(),
+            gemini_model: models.gemini_image.as_str().into(),
+        }
+    }
+
     pub fn data(&self, studio: &Studio) -> SettingsData {
         SettingsData {
+            assistant: self.assistant_data(studio),
             open: self.open,
             tab: self.tab,
             // The keymap's rows as the page draws them: the chord each
@@ -870,6 +980,9 @@ impl SettingsPane {
             gpu: !studio.prefs.software_gpu,
             gpu_switchable: cfg!(any(windows, target_os = "linux")),
             magnetic: studio.prefs.magnetic,
+            split_audio: studio.prefs.splits_audio(),
+            linked_selection: studio.prefs.links_selection(),
+            autosave: studio.prefs.autosaves(),
             download_source: self.download_source as i32,
             download_base: self.download_base.as_str().into(),
             server_enabled: studio.prefs.server.enabled,

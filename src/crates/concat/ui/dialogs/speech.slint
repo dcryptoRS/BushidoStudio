@@ -423,6 +423,10 @@ export component SpeechDialog inherits Modal {
                 Select {
                     options: root.models;
                     details: root.model-details;
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.data.model;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.model;
                     placeholder: I18n.t("common.noneInstalled");
                     enabled: root.models.length > 0;
@@ -440,6 +444,10 @@ export component SpeechDialog inherits Modal {
                     options: root.voices;
                     details: root.voice-details;
                     avatars: root.voice-avatars;
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.data.voice-count > 0 ? root.data.voice : -1;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.voice-count > 0 ? root.data.voice : -1;
                     placeholder: I18n.t("speech.none");
                     enabled: root.voices.length > 0;
@@ -546,6 +554,10 @@ export component SpeechDialog inherits Modal {
                 label: I18n.t("common.quality");
                 SegmentedControl {
                     options: [I18n.t("speech.quick"), I18n.t("common.balanced"), I18n.t("speech.fine")];
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.data.quality;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.quality;
                     changed(index) => { root.quality-changed(index); }
                 }
@@ -586,6 +598,10 @@ export component SpeechDialog inherits Modal {
                     names: root.samples;
                     waves: root.sample-waves;
                     details: root.sample-details;
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.data.sample;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.sample;
                     changed(index) => { root.sample-changed(index); }
                 }

@@ -157,11 +157,12 @@ pub enum SpeechMsg {
     /// Read the script.
     Begin,
     Cancel,
-    /// The synthesiser's worker reporting where it is, `0..=1`.
-    Progress(JobStage),
+    /// The synthesiser's worker reporting where it is, `0..=1`, for run
+    /// [`SpeechPane::run`] - an earlier run's is dropped.
+    Progress(u64, JobStage),
     /// The synthesiser's worker is done: the file it wrote, probed, or
-    /// why not.
-    Finished(Box<Result<MediaSummary, String>>),
+    /// why not; for a run, as `Progress` is.
+    Finished(u64, Box<Result<MediaSummary, String>>),
 }
 
 /// The speech sheet's state.
@@ -195,6 +196,11 @@ pub struct SpeechPane {
     /// a recording is not always where the speaking is.
     pub reference_start: f64,
     pub running: bool,
+    /// Which read the sheet is waiting on: a cancelled read that finished
+    /// anyway would otherwise land its voice at the next read's place, as
+    /// the captions sheet's did (audit 2026-10-15, L8). Counts up for the
+    /// life of the window, across the sheet's reopenings.
+    run: u64,
     /// How far the running read looks.
     pub pace: Pace,
     /// The model and the length of the running read: what its timing is
@@ -262,6 +268,7 @@ impl SpeechPane {
                     reference_start: 0.0,
                     speakers: std::mem::take(&mut self.speakers),
                     timings: std::mem::take(&mut self.timings),
+                    run: self.run,
                     saved: std::mem::take(&mut self.saved),
                     pictures: std::mem::take(&mut self.pictures),
                     ..SpeechPane::default()
@@ -380,11 +387,18 @@ impl SpeechPane {
             SpeechMsg::Begin => self.run(studio),
             SpeechMsg::Cancel => {
                 studio.host.speech.cancel();
+                // Whatever the cancelled read still says is not for anyone.
+                self.run += 1;
                 self.running = false;
                 self.open = false;
             }
-            SpeechMsg::Progress(stage) => self.pace.report(stage),
-            SpeechMsg::Finished(result) => {
+            SpeechMsg::Progress(run, stage) => {
+                if run == self.run {
+                    self.pace.report(stage);
+                }
+            }
+            SpeechMsg::Finished(run, _) if run != self.run => {}
+            SpeechMsg::Finished(_, result) => {
                 self.running = false;
                 if let (Ok(_), Some((model, chars))) = (result.as_ref(), self.reading.take()) {
                     self.timings.keep(&model, self.pace.learned(chars));
@@ -570,19 +584,21 @@ impl SpeechPane {
         let speech = Arc::clone(&studio.host.speech);
         self.running = true;
         self.message.clear();
+        self.run += 1;
+        let run = self.run;
         let epoch = crate::host::project_epoch();
         spawn_in_project(
             move || {
                 let spoken = speech.speak(&dirs, &request, move |stage| {
                     on_ui_in_project(epoch, move |studio, _, _| {
-                        studio.handle(Msg::Speech(SpeechMsg::Progress(stage)));
+                        studio.handle(Msg::Speech(SpeechMsg::Progress(run, stage)));
                     });
                 })?;
                 let summary = media::probe(&spoken.path)?;
                 Ok::<_, String>(summary)
             },
-            |studio, _, _, result| {
-                studio.handle(Msg::Speech(SpeechMsg::Finished(Box::new(result))))
+            move |studio, _, _, result| {
+                studio.handle(Msg::Speech(SpeechMsg::Finished(run, Box::new(result))))
             },
         );
     }

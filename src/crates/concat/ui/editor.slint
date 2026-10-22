@@ -15,8 +15,7 @@ import { MenuItemData } from "primitives/context-menu.slint";
 import {
     ClipData, ClipField, ClipTextField, DropData, SelectedClipData, SelectedTransitionData,
     StageGuideData, StageItemData, TimelineTabData, TimelineTool, TrackData,
-    TrackSize,
-} from "timeline/model.slint";
+    TrackSize, TimeSpan, MarkerData } from "timeline/model.slint";
 
 // Everything the four editor views read and everything they report, in one
 // place that is not a parent.
@@ -76,7 +75,10 @@ export global Editor {
     in-out property <int> media-count-audio;
     in-out property <int> media-count-images;
     in-out property <int> media-count-speech;
+    /// Motion graphics concat-studio rendered (Royalty Studio fork).
+    in-out property <int> media-count-motion;
     in-out property <int> media-count-processed;
+    in-out property <int> media-count-generated;
     in-out property <int> media-selected-count;
     in-out property <bool> importing;
     /// What the bin is narrowed to. Rust's, so the editor can point the
@@ -313,6 +315,9 @@ export global Editor {
     /// leave. A remembered preference, which Rust owns; the tray's button
     /// and the Settings switch both show it.
     in-out property <bool> magnetic;
+    /// Linked selection (Royalty Studio fork): a picture and its sound
+    /// selected and edited as one. Rust owns it; the tray and Settings show it.
+    in-out property <bool> linked: true;
     /// Hand tool: wheel and drag pan time instead of scrolling the stack.
     in-out property <bool> pan-mode: false;
     /// Trim follow: the playhead rides a clip edge while it is dragged. A
@@ -364,6 +369,7 @@ export global Editor {
     callback tool-changed(tool: TimelineTool);
     callback snap-changed(snap: bool);
     callback magnetic-changed(on: bool);
+    callback linked-changed(on: bool);
     callback pan-changed(on: bool);
     callback trim-follow-changed(on: bool);
     callback meters-shown-changed(on: bool);
@@ -385,7 +391,28 @@ export global Editor {
     /// Taking a clip's sound off its picture, and putting it back, are rows
     /// of the clip's own menu - see `clip-context`.
     callback captions();
+    /// The tray's Cut Pauses tool (Royalty Studio fork): the captions sheet
+    /// as Cut Pauses, or put away.
+    callback pauses-tool();
+    in-out property <bool> pauses-open;
+    /// The pauses Cut Pauses found, drawn over the lanes until they are cut.
+    in-out property <[TimeSpan]> cuts;
     callback speak();
+    /// The tray's Generate with AI tool (Royalty Studio fork): the sheet
+    /// that makes a clip or a picture from a prompt, or put away.
+    callback generate();
+    in-out property <bool> generate-open;
+    /// The scopes pane (Royalty Studio fork): the traces of the monitor's
+    /// frame, drawn on the GPU; which of them is shown, 0 waveform, 1
+    /// parade, 2 vectorscope, 3 histogram, 4 all four; and whether there
+    /// is a frame measured to show.
+    in-out property <image> scope-waveform;
+    in-out property <image> scope-parade;
+    in-out property <image> scope-vector;
+    in-out property <image> scope-histogram;
+    in-out property <int> scope-view;
+    in-out property <bool> scopes-ready;
+    callback scope-view-changed(view: int);
     /// The tray's record button: opens the voiceover panel, closes it, or
     /// stops the take it is running.
     callback record-voiceover();
@@ -423,7 +450,15 @@ export global Editor {
     callback finger-lifted();
     /// A ruler diamond was dragged: every key at `from` moves to `to`.
     callback key-mark-moved(from: float, to: float);
-    callback clip-pressed(id: string, additive: bool, edge: int);
+    /// The markers on the ruler, and a marker dragged or double-clicked
+    /// (Royalty Studio fork).
+    in-out property <[MarkerData]> markers;
+    callback marker-moved(id: string, to: float);
+    callback marker-opened(id: string);
+    /// The timeline's in and out points, in seconds; -1 for none.
+    in-out property <float> mark-in: -1;
+    in-out property <float> mark-out: -1;
+    callback clip-pressed(id: string, additive: bool, edge: int, alone: bool);
     /// Save Video Frame As, from the picture's right-click menu: the
     /// frame at the playhead, at the output's size, as a PNG.
     callback save-frame();
@@ -451,6 +486,12 @@ export global Editor {
     callback dropped(payload: string, seconds: float, y: length);
     callback track-flag-changed(index: int, visible: bool, muted: bool, locked: bool);
     callback track-sized(index: int, size: TrackSize);
+    /// A lane's height dragged at its edge in the header (Royalty Studio fork).
+    callback track-resized(index: int, height: length);
+    /// How many of the lanes, from the top, hold pictures, with sound lanes
+    /// under them: where the line between the two sits. Zero on a timeline
+    /// whose lanes have no kinds (Royalty Studio fork).
+    in-out property <int> video-rows;
     callback track-removed(index: int);
     /// A tab dragged to a new place in the strip. `to` is counted with the
     /// tab already out of its old slot, the way MoveTimeline counts.

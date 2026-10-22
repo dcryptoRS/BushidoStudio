@@ -12,6 +12,7 @@ import { PreviewPane } from "preview-pane.slint";
 import { TimelinePane } from "timeline-pane.slint";
 import { KeyframesPane } from "keyframes-pane.slint";
 import { ClaudePane } from "claude-pane.slint";
+import { ScopesPane } from "scopes-pane.slint";
 
 // One box of the workspace, showing whichever view its `kind` names.
 //
@@ -100,7 +101,10 @@ export component Seat inherits Rectangle {
             count-audio: Editor.media-count-audio;
             count-images: Editor.media-count-images;
             count-speech: Editor.media-count-speech;
+            count-motion: Editor.media-count-motion;
             count-processed: Editor.media-count-processed;
+            count-generated: Editor.media-count-generated;
+            generate => { Editor.generate(); }
             selected-count: Editor.media-selected-count;
             importing: Editor.importing;
             filter: Editor.media-filter;
@@ -176,7 +180,9 @@ export component Seat inherits Rectangle {
             duration: SourcePreview.open ? SourcePreview.duration : Editor.preview-duration;
             playhead-free: Editor.playhead-free && !SourcePreview.open;
             playing: SourcePreview.open ? SourcePreview.playing : Editor.playing;
-            source-name: SourcePreview.open ? SourcePreview.name : "";
+            source-name: !SourcePreview.open ? ""
+                : SourcePreview.marks == "" ? SourcePreview.name
+                : SourcePreview.name + "  ·  " + SourcePreview.marks;
             has-picture: Editor.has-picture;
             clip-name: Editor.preview-clip-name;
             frame: Editor.preview-frame;
@@ -351,6 +357,18 @@ export component Seat inherits Rectangle {
             pane-removed => { root.removed(); }
     }
 
+    if root.kind == PaneKind.scopes: ScopesPane {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.height;
+
+            pane-picked(kind) => { root.picked(kind); }
+            pane-seat: root.index;
+            pane-removable: Editor.seats.length > 1;
+            pane-removed => { root.removed(); }
+    }
+
     if root.kind == PaneKind.keyframes: KeyframesPane {
             x: 0;
             y: 0;
@@ -387,6 +405,8 @@ export component Seat inherits Rectangle {
             tool: Editor.tool;
             snap: Editor.snap;
             magnetic: Editor.magnetic;
+            linked: Editor.linked;
+            cuts: Editor.cuts;
             pan-mode: Editor.pan-mode;
             trim-follow: Editor.trim-follow;
             meters-shown: Editor.meters-shown;
@@ -419,6 +439,7 @@ export component Seat inherits Rectangle {
             tool-changed(tool) => { Editor.tool-changed(tool); }
             snap-changed(snap) => { Editor.snap-changed(snap); }
             magnetic-changed(on) => { Editor.magnetic-changed(on); }
+            linked-changed(on) => { Editor.linked-changed(on); }
             pan-changed(on) => { Editor.pan-changed(on); }
             trim-follow-changed(on) => { Editor.trim-follow-changed(on); }
             meters-shown-changed(on) => { Editor.meters-shown-changed(on); }
@@ -445,9 +466,9 @@ export component Seat inherits Rectangle {
                 Editor.blur();
                 Editor.scrubbed(seconds);
             }
-            clip-pressed(id, additive, edge) => {
+            clip-pressed(id, additive, edge, alone) => {
                 Editor.blur();
-                Editor.clip-pressed(id, additive, edge);
+                Editor.clip-pressed(id, additive, edge, alone);
             }
             clip-split(id, seconds) => { Editor.clip-split(id, seconds); }
             clip-volume(id, gain) => { Editor.clip-volume(id, gain); }
@@ -469,6 +490,8 @@ export component Seat inherits Rectangle {
                 Editor.track-flag-changed(index, visible, muted, locked);
             }
             track-sized(index, size) => { Editor.track-sized(index, size); }
+            track-resized(index, height) => { Editor.track-resized(index, height); }
+            video-rows: Editor.video-rows;
             track-removed(index) => { Editor.track-removed(index); }
         }
 

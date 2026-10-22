@@ -24,6 +24,7 @@ pub mod metrics;
 pub mod plan;
 #[cfg(test)]
 mod reference;
+pub mod scopes;
 #[cfg(test)]
 mod transitions;
 

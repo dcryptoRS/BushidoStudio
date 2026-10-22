@@ -26,11 +26,12 @@ pub mod doc;
 pub mod editor;
 pub mod model;
 pub mod placement;
+pub mod silence;
 pub mod speed;
 pub mod srt;
 
 pub use commands::{
-    Command, CommandError, Outcome, PlayheadSide, consolidation_clips, delete_to_playhead,
+    Command, CommandError, Outcome, PlayheadSide, Scope, consolidation_clips, delete_to_playhead,
     why_not_merge,
 };
 pub use doc::{DOCUMENT_VERSION, DocumentSettings, document_version, from_document, to_document};
@@ -66,6 +67,7 @@ mod tests {
                 has_audio,
                 audio_tracks: Vec::new(),
                 origin: None,
+                motion: None,
                 color_space: Default::default(),
             },
         }
@@ -1536,6 +1538,7 @@ mod tests {
             has_audio: false,
             audio_tracks: Vec::new(),
             origin: None,
+            motion: None,
             color_space: Default::default(),
         };
         let outcome = editor
@@ -1569,6 +1572,7 @@ mod tests {
             has_audio: true,
             audio_tracks: Vec::new(),
             origin: None,
+            motion: None,
             color_space: Default::default(),
         };
         let outcome = editor
@@ -1640,6 +1644,7 @@ mod tests {
                 has_audio: false,
                 audio_tracks: Vec::new(),
                 origin: None,
+                motion: None,
                 color_space: Default::default(),
             }
         };
@@ -1685,6 +1690,7 @@ mod tests {
             has_audio: false,
             audio_tracks: Vec::new(),
             origin: None,
+            motion: None,
             color_space: Default::default(),
         };
         let freeze_id = editor
@@ -1763,6 +1769,7 @@ mod tests {
                     has_audio: false,
                     audio_tracks: Vec::new(),
                     origin: None,
+                    motion: None,
                     color_space: Default::default(),
                 }),
             })
@@ -3388,6 +3395,7 @@ mod tests {
                     has_audio: false,
                     audio_tracks: Vec::new(),
                     origin: None,
+                    motion: None,
                     color_space: Default::default(),
                 },
             })
@@ -3429,6 +3437,7 @@ mod tests {
                 has_audio: false,
                 audio_tracks: Vec::new(),
                 origin: None,
+                motion: None,
                 color_space: Default::default(),
             },
         });
@@ -3438,6 +3447,155 @@ mod tests {
                 .to_string()
                 .contains("not a template slot")
         );
+    }
+
+    /// A render of a motion graphic, as concat-studio makes one: `seconds`
+    /// long, made from `template` with the text `text`.
+    fn render(path: &str, seconds: f64, template: &str, text: &str) -> crate::commands::NewMedia {
+        let mut props = serde_json::Map::new();
+        props.insert("text".to_owned(), serde_json::json!(text));
+        props.insert("seconds".to_owned(), serde_json::json!(seconds));
+        crate::commands::NewMedia {
+            path: path.to_owned(),
+            name: path.trim_start_matches('/').to_owned(),
+            duration: Some(seconds),
+            kind: MediaKind::Video,
+            width: Some(1080),
+            height: Some(1920),
+            frame_rate: Some(30.0),
+            frame_rate_fraction: Some("30/1".to_owned()),
+            video_codec: Some("qtrle".to_owned()),
+            audio_codec: None,
+            has_audio: false,
+            audio_tracks: Vec::new(),
+            origin: Some(crate::model::MediaOrigin::Motion),
+            motion: Some(crate::model::Motion {
+                template: template.to_owned(),
+                props,
+            }),
+            color_space: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_new_render_takes_the_motion_graphics_place_and_undoes() {
+        let (mut editor, media_id, clip_id) = fixture();
+        editor
+            .apply(Command::ReplaceMotion {
+                media_id: media_id.clone(),
+                item: render("/badge-2.mov", 6.0, "badge", "Nuevo"),
+            })
+            .expect("replaces");
+
+        let media = &editor.project().media[0];
+        assert_eq!(media.id, media_id, "the id survives, so clips keep working");
+        assert_eq!(media.path, "/badge-2.mov");
+        assert_eq!(media.name, "a.mp4", "the bin name stays the user's");
+        assert_eq!(media.duration, Some(6.0));
+        assert_eq!(media.origin, Some(crate::model::MediaOrigin::Motion));
+        let motion = media.motion.as_ref().expect("the recipe is kept");
+        assert_eq!(motion.template, "badge");
+        assert_eq!(motion.props["text"], serde_json::json!("Nuevo"));
+        let clip = &editor.project().active().clips[0];
+        assert_eq!(clip.id, clip_id);
+        assert_eq!(
+            clip.duration, 6.0,
+            "the whole render follows the new length"
+        );
+
+        editor.undo();
+        let media = &editor.project().media[0];
+        assert_eq!(media.path, "/a.mp4", "one undo puts the old render back");
+        assert_eq!(media.motion, None);
+        assert_eq!(editor.project().active().clips[0].duration, 10.0);
+    }
+
+    #[test]
+    fn a_longer_render_lengthens_the_whole_clip_as_far_as_the_next_one() {
+        let (mut editor, media_id, _) = fixture();
+        let track_id = editor.project().active().tracks[0].id.clone();
+        lane(&mut editor, &media_id, &track_id, &[12.0]);
+        editor
+            .apply(Command::ReplaceMotion {
+                media_id,
+                item: render("/sting-2.mov", 15.0, "logo-sting", ""),
+            })
+            .expect("replaces");
+        let clips = &editor.project().active().clips;
+        assert_eq!(
+            clips[0].duration, 12.0,
+            "it stops where the next clip starts"
+        );
+        assert_eq!(clips[1].start, 12.0, "the next clip is not moved");
+        assert_eq!(clips[1].duration, 15.0, "nothing after it, so all of it");
+    }
+
+    #[test]
+    fn a_cut_from_a_motion_graphic_keeps_its_cut_inside_the_new_length() {
+        let (mut editor, media_id, clip_id) = fixture();
+        editor
+            .apply(Command::TrimClip {
+                clip_id,
+                edge: TrimEdge::Start,
+                delta: 2.0,
+                ripple: false,
+            })
+            .expect("trims");
+        editor
+            .apply(Command::ReplaceMotion {
+                media_id: media_id.clone(),
+                item: render("/long.mov", 20.0, "stat", "+1200"),
+            })
+            .expect("replaces");
+        let clip = &editor.project().active().clips[0];
+        assert_eq!(clip.source_start, 2.0, "a longer render keeps the cut");
+        assert_eq!(clip.duration, 8.0);
+
+        editor
+            .apply(Command::ReplaceMotion {
+                media_id,
+                item: render("/short.mov", 6.0, "stat", "+1200"),
+            })
+            .expect("replaces");
+        let clip = &editor.project().active().clips[0];
+        assert_eq!(clip.source_start, 2.0);
+        assert_eq!(clip.duration, 4.0, "a shorter one holds the cut inside it");
+    }
+
+    #[test]
+    fn replacing_media_no_longer_in_the_bin_is_refused() {
+        let (mut editor, _, _) = fixture();
+        let refused = editor.apply(Command::ReplaceMotion {
+            media_id: "m99".to_owned(),
+            item: render("/x.mov", 3.0, "badge", "x"),
+        });
+        assert!(
+            refused
+                .unwrap_err()
+                .to_string()
+                .contains("no longer in the bin")
+        );
+    }
+
+    #[test]
+    fn a_recipe_round_trips_and_other_media_say_nothing_of_one() {
+        let (mut editor, media_id, _) = fixture();
+        let plain = serde_json::to_value(&editor.project().media[0]).expect("serialises");
+        assert!(
+            plain.get("motion").is_none(),
+            "documents without motion graphics stay as they were"
+        );
+        editor
+            .apply(Command::ReplaceMotion {
+                media_id,
+                item: render("/badge.mov", 3.0, "badge", "Nuevo"),
+            })
+            .expect("replaces");
+        let item = &editor.project().media[0];
+        let json = serde_json::to_string(item).expect("serialises");
+        assert!(json.contains("\"origin\":\"motion\""));
+        let back: crate::model::MediaItem = serde_json::from_str(&json).expect("parses");
+        assert_eq!(&back, item);
     }
 
     #[test]
@@ -4762,6 +4920,7 @@ mod tests {
             color_range: None,
             color_space: Default::default(),
             origin: None,
+            motion: None,
             extra: Default::default(),
         });
 
@@ -4801,6 +4960,7 @@ mod tests {
             color_range: None,
             color_space: Default::default(),
             origin: None,
+            motion: None,
             extra: Default::default(),
         });
 
@@ -4965,6 +5125,7 @@ mod tests {
             has_audio: false,
             audio_tracks: Vec::new(),
             origin: None,
+            motion: None,
             color_space: Default::default(),
         };
         let mut editor = Editor::new();

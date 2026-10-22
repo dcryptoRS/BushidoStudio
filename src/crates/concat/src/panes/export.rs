@@ -54,13 +54,16 @@ pub enum ExportMsg {
     Cancel,
     /// The render's worker reporting where it is.
     Progress {
+        /// Which render: [`ExportPane::run`] when it started.
+        run: u64,
         /// Of the whole, `0..=1`.
         fraction: f32,
         /// What it is doing, in the person's language.
         stage: String,
     },
-    /// The render's worker is done: the file written, or why not.
-    Finished(Result<String, String>),
+    /// The render's worker is done, for a run as `Progress` is: the file
+    /// written, or why not.
+    Finished(u64, Result<String, String>),
     /// The phone has moved the file to where it shows it - the path under
     /// the phone's storage - or could not, and the file is where it was.
     Published(Result<String, String>),
@@ -91,6 +94,10 @@ pub struct ExportPane {
     pub written: String,
     /// When the render started, for a real ETA.
     started_at: Option<std::time::Instant>,
+    /// Which render the sheet is waiting on. The slot frees as the worker
+    /// ends, before its answer reaches the window: a render started in
+    /// between was told the cancelled one's "cancelled" as its own failure.
+    run: u64,
 }
 
 impl Default for ExportPane {
@@ -119,6 +126,7 @@ impl Default for ExportPane {
             message: String::new(),
             written: String::new(),
             started_at: None,
+            run: 0,
         }
     }
 }
@@ -190,16 +198,20 @@ impl ExportPane {
             ExportMsg::Overwrite => self.begin(studio, true),
             ExportMsg::Cancel => {
                 studio.host.exporter.cancel();
+                self.run += 1;
                 self.phase = ExportPhase::Idle;
                 self.progress = 0.0;
             }
-            ExportMsg::Progress { fraction, stage } => {
+            ExportMsg::Progress { run, .. } | ExportMsg::Finished(run, _) if run != self.run => {}
+            ExportMsg::Progress {
+                fraction, stage, ..
+            } => {
                 if self.phase == ExportPhase::Running {
                     self.progress = fraction.clamp(0.0, 1.0);
                     self.stage = stage;
                 }
             }
-            ExportMsg::Finished(Ok(written)) => {
+            ExportMsg::Finished(_, Ok(written)) => {
                 self.phase = ExportPhase::Done;
                 self.progress = 1.0;
                 self.written = written.clone();
@@ -222,7 +234,7 @@ impl ExportPane {
                 let folder = platform::published_folder().unwrap_or_default();
                 studio.notify(&tf("export.couldNotPublish", &[&folder, &error]), true);
             }
-            ExportMsg::Finished(Err(error)) => {
+            ExportMsg::Finished(_, Err(error)) => {
                 if self.phase == ExportPhase::Idle {
                     // Cancelled: the sheet already went back to idle.
                     return;
@@ -386,7 +398,7 @@ impl ExportPane {
         studio.timeline().video.color_space.is_hdr()
             && !self.sdr
             && deep.ten_bit_available()
-            && deep.encodable()
+            && deep.encodable_known().unwrap_or(true)
     }
 
     /// Whether the file is written at ten bits: HDR always, SDR when the
@@ -477,6 +489,8 @@ impl ExportPane {
         self.message.clear();
         self.written.clear();
         self.started_at = Some(std::time::Instant::now());
+        self.run += 1;
+        let run = self.run;
 
         // The export draws on the window's device - a sibling of the
         // monitor's compositor - not on a second device opened through the
@@ -503,11 +517,17 @@ impl ExportPane {
                         other => other.to_owned(),
                     };
                     on_ui(move |studio, _, _| {
-                        studio.handle(Msg::Export(ExportMsg::Progress { fraction, stage }));
+                        studio.handle(Msg::Export(ExportMsg::Progress {
+                            run,
+                            fraction,
+                            stage,
+                        }));
                     });
                 })
             },
-            |studio, _, _, result| studio.handle(Msg::Export(ExportMsg::Finished(result))),
+            move |studio, _, _, result| {
+                studio.handle(Msg::Export(ExportMsg::Finished(run, result)))
+            },
         );
     }
 
@@ -578,9 +598,17 @@ impl ExportPane {
                 .iter()
                 .position(|codec| *codec == self.codec(studio))
                 .unwrap_or(0) as i32,
-            h264_encodable: concat_media::VideoCodec::H264.encodable(),
-            hevc_encodable: concat_media::VideoCodec::Hevc.encodable(),
-            av1_encodable: concat_media::VideoCodec::Av1.encodable(),
+            // What the start-up probe found; until it answers, every codec
+            // is offered, and the pick itself asks (see `CodecChanged`).
+            h264_encodable: concat_media::VideoCodec::H264
+                .encodable_known()
+                .unwrap_or(true),
+            hevc_encodable: concat_media::VideoCodec::Hevc
+                .encodable_known()
+                .unwrap_or(true),
+            av1_encodable: concat_media::VideoCodec::Av1
+                .encodable_known()
+                .unwrap_or(true),
             ten_bit: self.ten_bit,
             hdr_timeline: studio.timeline().video.color_space.is_hdr(),
             hdr: self.hdr(studio),

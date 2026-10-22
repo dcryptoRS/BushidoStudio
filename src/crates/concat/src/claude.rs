@@ -25,13 +25,16 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::rc::Rc;
+use std::sync::Mutex;
 
 use serde_json::{Value, json};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::host::Shell;
+use crate::i18n::{t, tf};
 use crate::panes::Msg;
 use crate::panes::settings::SettingsMsg;
+use crate::prefs::AssistantPrefs;
 use crate::studio::Studio;
 use crate::ui::{App, ChatEntry, Claude};
 
@@ -40,29 +43,78 @@ const CLAUDE: i32 = 1;
 const TOOL: i32 = 2;
 const NOTE: i32 = 3;
 
-/// What Claude is told about where it is, after its own system prompt.
-const PROMPT: &str = "\
-Estás en el panel «Claude» dentro de Concat, el editor de vídeo de Dany (Royalty Studio), \
-mientras Dany edita. Responde en español, breve y directo: di en una o dos frases qué hiciste.\n\
-Cada mensaje empieza con una línea [Concat] que dice qué proyecto está abierto en la ventana, \
-dónde está el cabezal y qué hay seleccionado. Ese proyecto se edita EN VIVO con el MCP `concat` \
-(modo ventana, live mode): cada herramienta que lo cambia se ve en pantalla al momento y queda \
-en el historial de deshacer de Dany, una edición por llamada. Usa esa carpeta como `path`. No \
-abras otros proyectos ni cierres este salvo que Dany lo pida, y no guardes (project_save) salvo \
-que lo pida: la ventana guarda sola.\n\
-Para overlays de marca, subtítulos palabra a palabra, LUTs y perfil de color usa el MCP \
-`concat-studio` y sigue la skill concat-editor. Si ninguna plantilla sirve, escribe tú la animación \
-en código Remotion con overlay_compose, como en un proyecto de Remotion (lee antes src/kit.tsx y \
-src/templates/index.tsx), y luego renderízala con overlay_render y colócala como cualquier overlay. \
-Antes de decir que algo quedó bien, míralo con preview_frame.";
+/// What Claude is told about where it is and whom it works for, after its
+/// own system prompt: the person's name, where their material is and what
+/// is out of bounds, from Settings > Assistant and AI. English, since it is
+/// read by the model; it answers in the language it is written to.
+fn prompt(assistant: &AssistantPrefs, studio: bool) -> String {
+    let name = assistant.name.trim();
+    let who = if name.is_empty() {
+        "the person editing"
+    } else {
+        name
+    };
+    let mut text = format!(
+        "You are in the Claude panel inside the video editor, working with {who} while \
+they edit. Answer in the language they write in, short and direct: say in a sentence or two \
+what you did.\n\
+Every message starts with a [Concat] line saying which project is open in the window, where \
+the playhead is and what is selected. That project is edited LIVE through the `concat` MCP \
+server (window mode): every tool that changes it shows on screen at once and lands in \
+{who}'s undo history, one edit per call. Use that folder as `path`. Do not open other \
+projects or close this one unless asked, and do not save (project_save) unless asked: the \
+window saves by itself.\n\
+Before saying something looks right, look at it with preview_frame.\n"
+    );
+    if studio {
+        text.push_str(
+            "For brand overlays, word-by-word captions, LUTs and color profiles use the \
+`concat-studio` MCP server and follow the concat-editor skill. When no template fits, write the \
+animation yourself in Remotion code with overlay_compose (read src/kit.tsx and \
+src/templates/index.tsx first), render it with overlay_render and place it like any overlay. \
+When importing an overlay, pass media_import the `motion` overlay_render returned, so it can be \
+retouched in the Motion tab; to change one already placed, render it again and use \
+media_replace_motion with its mediaId instead of importing it again.\n",
+        );
+    }
+    let footage: Vec<&str> = assistant.footage.iter().map(String::as_str).collect();
+    text.push_str(&format!(
+        "You have every permission on this computer: commands (Bash), reading and writing \
+files, the home folder and the mounted drives.{} Use them with care: the project is edited \
+through the `concat` MCP server, never by editing its concat.json by hand (the window would not \
+see it), and animations with overlay_compose, which builds and checks them, not by writing the \
+.tsx yourself. A guard blocks what cannot be undone (sudo, deleting whole folders or more than \
+300 files / 3 GB at once, Docker clean-ups, discarding git work, shutting the machine down",
+        if footage.is_empty() {
+            String::new()
+        } else {
+            format!(" Their material is in: {}.", footage.join(", "))
+        }
+    ));
+    if !assistant.protected.is_empty() {
+        text.push_str(&format!(", anything of {}", assistant.protected.join(", ")));
+    }
+    text.push_str(&format!(
+        "): if something like that is needed, explain it to {who} instead of working around it."
+    ));
+    text
+}
 
-/// The tools Claude may use from the pane: the two MCP servers, which can
-/// only do what Concat and concat-studio do, and reading files. Nothing
-/// that writes a file or runs a command is allowed here - in print mode a
-/// tool not on this list is refused, not asked about - so new templates
-/// and anything else of that kind are made from a Claude Code session in a
-/// terminal, where each step is approved.
-const ALLOWED: &[&str] = &["mcp__concat", "mcp__concat-studio", "Read", "Glob", "Grep"];
+/// The Claude pane runs with every permission (the fork's choice,
+/// 2026-10-20): commands, files, the home folder and the drives, without
+/// asking. The one limit is this guard, a PreToolUse hook that refuses what
+/// cannot be taken back - sudo, deleting whole folders or more than 300
+/// files / 3 GB at once, Docker clean-ups, discarding git work, shutting the
+/// machine down, and anything of what Settings protects. Written next to
+/// the logs on each start, with that list beside it, so the binary carries
+/// it.
+const GUARD: &str = include_str!("claude-guard.py");
+
+/// How a professional editor and colorist works - cutting, continuity, shot
+/// language, color, sound, short-form - as the assistant is told it with
+/// its system prompt (Royalty Studio fork). Written for the program, so it
+/// ships with it, whoever runs it.
+const CRAFT: &str = include_str!("craft.md");
 
 struct Running {
     child: Child,
@@ -124,6 +176,12 @@ fn push(chat: &Chat, role: i32, text: impl Into<SharedString>) {
     });
 }
 
+/// The pane's note, for the window's publish: the project it would edit
+/// changes when one is opened or closed, not only when Claude speaks.
+pub fn publish(studio: &Studio, app: &App) {
+    refresh(studio, app);
+}
+
 /// The pane's status line and flags, from the conversation and the window.
 fn refresh(studio: &Studio, app: &App) {
     let global = app.global::<Claude>();
@@ -134,12 +192,12 @@ fn refresh(studio: &Studio, app: &App) {
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_default();
             if studio.prefs.server.enabled && studio.prefs.server.live {
-                format!("{name} · en vivo")
+                tf("claude.noteLive", &[&name])
             } else {
-                format!("{name} · se conectará al escribir")
+                tf("claude.noteOnSend", &[&name])
             }
         }
-        None => "Abre un proyecto para que Claude lo edite".to_owned(),
+        None => t("claude.openAProject"),
     };
     global.set_note(note.into());
     CHAT.with(|chat| {
@@ -166,17 +224,17 @@ fn context(studio: &Studio) -> String {
     match studio.session.as_ref() {
         Some(session) => {
             let selection = if studio.selection.is_empty() {
-                "nada".to_owned()
+                "nothing".to_owned()
             } else {
                 studio.selection.join(", ")
             };
             format!(
-                "[Concat] Proyecto abierto: {} · cabezal en {:.2} s · seleccionado: {selection}",
+                "[Concat] Open project: {} · playhead at {:.2} s · selected: {selection}",
                 session.path(),
                 studio.playhead
             )
         }
-        None => "[Concat] No hay ningún proyecto abierto en la ventana.".to_owned(),
+        None => "[Concat] No project is open in the window.".to_owned(),
     }
 }
 
@@ -186,12 +244,16 @@ fn send(text: String) {
         return;
     }
     Shell::with(|shell, app| {
-        let (line, logs) = {
+        let (line, logs, assistant) = {
             let mut studio = shell.studio.borrow_mut();
             if studio.session.is_some() {
                 ensure_server(&mut studio);
             }
-            (context(&studio), studio.host.dirs.data.join("logs"))
+            (
+                context(&studio),
+                studio.host.dirs.data.join("logs"),
+                studio.prefs.assistant.clone(),
+            )
         };
         shell.studio.borrow().publish(&app, &shell.models);
         CHAT.with(|chat| {
@@ -199,7 +261,7 @@ fn send(text: String) {
             push(&chat, YOU, text.clone());
             if chat.process.is_none() {
                 chat.epoch += 1;
-                match start(chat.session.as_deref(), chat.epoch, &logs) {
+                match start(chat.session.as_deref(), chat.epoch, &logs, &assistant) {
                     Ok(running) => chat.process = Some(running),
                     Err(error) => {
                         push(&chat, NOTE, error);
@@ -217,14 +279,10 @@ fn send(text: String) {
             if written {
                 chat.busy = true;
                 chat.streaming = None;
-                chat.status = "Pensando…".to_owned();
+                chat.status = t("claude.thinking");
             } else {
                 chat.process = None;
-                push(
-                    &chat,
-                    NOTE,
-                    "No pude hablar con Claude Code; vuelve a enviarlo.",
-                );
+                push(&chat, NOTE, t("claude.couldNotSend"));
             }
         });
         refresh(&shell.studio.borrow(), &app);
@@ -237,11 +295,7 @@ fn stop() {
         if chat.process.take().is_some() {
             chat.epoch += 1;
             if chat.busy {
-                push(
-                    &chat,
-                    NOTE,
-                    "Detenido. Lo que ya hizo se queda; deshazlo con Ctrl+Z si quieres.",
-                );
+                push(&chat, NOTE, t("claude.stopped"));
             }
         }
         chat.busy = false;
@@ -295,24 +349,51 @@ fn claude_binary() -> Result<PathBuf, String> {
     candidates
         .into_iter()
         .find(|candidate| candidate.is_file())
-        .ok_or_else(|| {
-            "No encuentro Claude Code (`claude`). Instálalo, o di dónde está con CONCAT_CLAUDE."
-                .to_owned()
-        })
+        .ok_or_else(|| t("claude.notFound"))
 }
 
-/// concat-studio's MCP server, if it is installed.
-fn studio_server() -> Option<PathBuf> {
+/// Where Settings > Assistant and AI says concat-studio's server is, when
+/// it says; set as the preferences are read and as the field is edited.
+static STUDIO: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Remembers where concat-studio's server is, from the preferences.
+pub(crate) fn set_studio_server(path: Option<&str>) {
+    let path = path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(expand);
+    if let Ok(mut studio) = STUDIO.lock() {
+        *studio = path;
+    }
+}
+
+/// `~/...` read as the home folder's.
+pub(crate) fn expand(path: &str) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => home().join(rest),
+        None if path == "~" => home(),
+        None => PathBuf::from(path),
+    }
+}
+
+/// concat-studio's MCP server, if it is installed: `CONCAT_STUDIO_MCP`,
+/// the one Settings names, or where its installer puts it.
+pub(crate) fn studio_server() -> Option<PathBuf> {
     std::env::var_os("CONCAT_STUDIO_MCP")
         .map(PathBuf::from)
+        .or_else(|| STUDIO.lock().ok().and_then(|studio| studio.clone()))
         .or_else(|| Some(home().join("dev/concat-studio/bin/concat-studio-mcp")))
         .filter(|path| path.is_file())
 }
 
-fn start(session: Option<&str>, epoch: u64, logs: &std::path::Path) -> Result<Running, String> {
+fn start(
+    session: Option<&str>,
+    epoch: u64,
+    logs: &std::path::Path,
+    assistant: &AssistantPrefs,
+) -> Result<Running, String> {
     let claude = claude_binary()?;
-    let me = std::env::current_exe()
-        .map_err(|error| format!("Concat no se encuentra a sí mismo: {error}"))?;
+    let me = std::env::current_exe().map_err(|error| tf("claude.noSelf", &[&error]))?;
     let home = home();
     // Where the agent may write: home, and the drives mounted for this user.
     let mut roots = vec![home.clone()];
@@ -329,7 +410,8 @@ fn start(session: Option<&str>, epoch: u64, logs: &std::path::Path) -> Result<Ru
             "env": { "CONCAT_MCP_ROOTS": roots },
         },
     });
-    if let Some(studio) = studio_server() {
+    let studio = studio_server();
+    if let Some(studio) = &studio {
         servers["concat-studio"] = json!({ "command": studio, "args": [] });
     }
     let config = json!({ "mcpServers": servers }).to_string();
@@ -344,16 +426,53 @@ fn start(session: Option<&str>, epoch: u64, logs: &std::path::Path) -> Result<Ru
         "--verbose",
         "--include-partial-messages",
         "--strict-mcp-config",
-        "--append-system-prompt",
-        PROMPT,
     ]);
+    // Where it is and what it may do, then how a professional cuts and grades.
+    command.arg("--append-system-prompt").arg(format!(
+        "{}\n\n{CRAFT}",
+        prompt(assistant, studio.is_some())
+    ));
     command.arg("--mcp-config").arg(&config);
-    command.arg("--allowedTools").args(ALLOWED);
+    command.args(["--permission-mode", "bypassPermissions"]);
+    // Read, Glob and Grep keep to the working directory and these; without
+    // them Claude could not see the footage and the music it is asked for.
+    command.arg("--add-dir").arg(&home);
+    if let Some(user) = home.file_name() {
+        command.arg(PathBuf::from("/run/media").join(user));
+    }
+    for folder in &assistant.footage {
+        let folder = expand(folder);
+        if folder.is_dir() && !folder.starts_with(&home) {
+            command.arg(folder);
+        }
+    }
+    // The guard, and beside it what this person wants kept out of reach.
+    let guard = logs.parent().unwrap_or(logs).join("claude-guard.py");
+    std::fs::write(&guard, GUARD).map_err(|error| tf("claude.noGuard", &[&error]))?;
+    let fences = json!({
+        "protected": assistant.protected,
+        "keep": [home.join("dev/Concat"), home.join("dev/concat-studio")],
+    });
+    std::fs::write(guard.with_extension("json"), fences.to_string())
+        .map_err(|error| tf("claude.noGuard", &[&error]))?;
+    let hooks = json!({
+        "hooks": { "PreToolUse": [{
+            "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
+            "hooks": [{ "type": "command", "command": format!("python3 '{}'", guard.display()) }],
+        }]},
+    });
+    command.arg("--settings").arg(hooks.to_string());
     if let Some(session) = session {
         command.arg("--resume").arg(session);
     }
-    let workdir = home.join("dev/concat-studio");
-    command.current_dir(if workdir.is_dir() { workdir } else { home });
+    // concat-studio's checkout, where its skill and kit are read from:
+    // the server lives in its `bin`.
+    let workdir = studio
+        .as_deref()
+        .and_then(|server| server.parent()?.parent())
+        .filter(|dir| dir.join("src").is_dir())
+        .map(PathBuf::from);
+    command.current_dir(workdir.unwrap_or(home));
     let _ = std::fs::create_dir_all(logs);
     let stderr = std::fs::OpenOptions::new()
         .create(true)
@@ -365,14 +484,11 @@ fn start(session: Option<&str>, epoch: u64, logs: &std::path::Path) -> Result<Ru
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(stderr);
-    let mut child = command.spawn().map_err(|error| {
-        format!(
-            "No pude arrancar Claude Code ({}): {error}",
-            claude.display()
-        )
-    })?;
-    let stdin = child.stdin.take().ok_or("Claude Code sin entrada")?;
-    let stdout = child.stdout.take().ok_or("Claude Code sin salida")?;
+    let mut child = command
+        .spawn()
+        .map_err(|error| tf("claude.couldNotStart", &[&claude.display(), &error]))?;
+    let stdin = child.stdin.take().ok_or_else(|| t("claude.noPipes"))?;
+    let stdout = child.stdout.take().ok_or_else(|| t("claude.noPipes"))?;
     log::info!("claude: started {} (session {session:?})", claude.display());
     std::thread::Builder::new()
         .name("claude".to_owned())
@@ -441,12 +557,13 @@ fn interpret(value: &Value) -> Vec<Event> {
             let event = &value["event"];
             match event["type"].as_str().unwrap_or_default() {
                 "content_block_start" => match event["content_block"]["type"].as_str() {
-                    Some("thinking") => vec![Event::Status("Pensando…".to_owned())],
+                    Some("thinking") => vec![Event::Status(t("claude.thinking"))],
                     Some("tool_use") => {
                         let name = event["content_block"]["name"]
                             .as_str()
-                            .unwrap_or("una herramienta");
-                        vec![Event::Status(format!("Usando {}…", short(name)))]
+                            .map(|name| short(name).to_owned())
+                            .unwrap_or_else(|| t("claude.aTool"));
+                        vec![Event::Status(tf("claude.using", &[&name]))]
                     }
                     _ => Vec::new(),
                 },
@@ -536,29 +653,27 @@ fn deliver(epoch: u64, events: Vec<Event>) {
                         chat.status.clear();
                     }
                 },
-                Event::Text(text) => {
-                    match chat.streaming.take() {
-                        Some(row) => chat.entries.set_row_data(
-                            row,
-                            ChatEntry {
-                                role: CLAUDE,
-                                text: text.into(),
-                            },
-                        ),
-                        None => push(&chat, CLAUDE, text),
-                    }
-                }
+                Event::Text(text) => match chat.streaming.take() {
+                    Some(row) => chat.entries.set_row_data(
+                        row,
+                        ChatEntry {
+                            role: CLAUDE,
+                            text: text.into(),
+                        },
+                    ),
+                    None => push(&chat, CLAUDE, text),
+                },
                 Event::Tool(line) => {
                     chat.streaming = None;
                     push(&chat, TOOL, line);
                 }
-                Event::ToolError(text) => push(&chat, NOTE, format!("Falló una herramienta: {text}")),
+                Event::ToolError(text) => push(&chat, NOTE, tf("claude.toolFailed", &[&text])),
                 Event::Done(error) => {
                     chat.busy = false;
                     chat.streaming = None;
                     chat.status.clear();
                     if let Some(error) = error {
-                        push(&chat, NOTE, format!("No terminó bien: {error}"));
+                        push(&chat, NOTE, tf("claude.endedBadly", &[&error]));
                     }
                 }
                 Event::Exited => {
@@ -566,11 +681,7 @@ fn deliver(epoch: u64, events: Vec<Event>) {
                     if chat.busy {
                         chat.busy = false;
                         chat.status.clear();
-                        push(
-                            &chat,
-                            NOTE,
-                            "Claude Code se cerró. Mira logs/claude.log en la carpeta de datos de Concat.",
-                        );
+                        push(&chat, NOTE, t("claude.exited"));
                     }
                 }
             }

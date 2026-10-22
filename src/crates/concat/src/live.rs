@@ -57,6 +57,16 @@ impl WindowLive {
     }
 }
 
+/// The window's state was held - a dialog open inside a handler, say - when
+/// the call came round. Said, so the caller can try again, rather than
+/// borrowed regardless, which would panic the window (Royalty Studio fork).
+fn busy() -> ApiError {
+    ApiError::new(
+        ErrorCode::Failed,
+        "the window is busy (a dialog may be open): try again in a moment".to_owned(),
+    )
+}
+
 fn gone() -> ApiError {
     ApiError::new(
         ErrorCode::Failed,
@@ -73,9 +83,12 @@ impl Live for WindowLive {
         let (answer, answered) = mpsc::channel();
         slint::invoke_from_event_loop(move || {
             Shell::with(|shell, app| {
-                let reply = shell.studio.borrow_mut().run_live(edits, job);
-                if edits {
-                    shell.studio.borrow().publish(&app, &shell.models);
+                let reply = match shell.studio.try_borrow_mut() {
+                    Ok(mut studio) => studio.run_live(edits, job),
+                    Err(_) => Err(busy()),
+                };
+                if edits && let Ok(studio) = shell.studio.try_borrow() {
+                    studio.publish(&app, &shell.models);
                 }
                 let _ = answer.send(reply);
             });
@@ -88,19 +101,17 @@ impl Live for WindowLive {
         let (answer, answered) = mpsc::channel();
         slint::invoke_from_event_loop(move || {
             Shell::with(|shell, _| {
-                let copy = shell
-                    .studio
-                    .borrow()
-                    .session
-                    .as_ref()
-                    .map(Session::snapshot);
+                let copy = match shell.studio.try_borrow() {
+                    Ok(studio) => Ok(studio.session.as_ref().map(Session::snapshot)),
+                    Err(_) => Err(busy()),
+                };
                 let _ = answer.send(copy);
             });
         })
         .map_err(|_| gone())?;
         answered
             .recv_timeout(WAIT)
-            .map_err(|_| gone())?
+            .map_err(|_| gone())??
             .ok_or_else(|| {
                 ApiError::new(
                     ErrorCode::NotOpen,

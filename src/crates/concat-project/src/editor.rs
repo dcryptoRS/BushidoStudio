@@ -82,6 +82,16 @@ impl Editor {
         })
     }
 
+    /// Gives every timeline from before lanes had kinds its picture and
+    /// sound lanes, the sound of every video on a sound lane linked to it
+    /// (Royalty Studio fork; see [`crate::commands::type_lanes`]), as the
+    /// document is read: not a step to undo. Returns whether anything
+    /// changed, which is the host's cue to keep a copy of the document as it
+    /// was before its first save.
+    pub fn type_lanes(&mut self) -> bool {
+        crate::commands::type_lanes(&mut self.project, &mut self.mint)
+    }
+
     /// Rewrites the picture links `upgrade` changes - one to a retired
     /// effect, read as a link to the effect that stands in for it - as the
     /// document is read, before any edit: not a step to undo, since it is

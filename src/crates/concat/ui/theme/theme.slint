@@ -52,7 +52,8 @@ export global Theme {
     /// Settings > Appearance picks it (lib.rs, `on_settings_accent_changed`)
     /// the way it picks `dark`, and it retones the window the same way.
     /// Remembered by name rather than by number, so a list that grows or
-    /// reorders keeps everyone's choice; 0 is Lime, the default. One past
+    /// reorders keeps everyone's choice; 0 is Blue, the default (a Mac's,
+    /// in the Royalty Studio fork; Lime is Concat's). One past
     /// the last name is the custom colour, `accent-custom`.
     in-out property <int> accent-choice: 0;
     /// A colour picked by hand in place of any on the list. Read only while
@@ -69,7 +70,7 @@ export global Theme {
     /// name is the English word Settings shows for it, and the id it is
     /// remembered under in settings.json, lower-cased; the dialog holds the
     /// same list wrapped for translation, in this order.
-    out property <[string]> accent-names: ["Lime", "Sky", "Violet", "Rose", "Amber", "Mint"];
+    out property <[string]> accent-names: ["Blue", "Lime", "Sky", "Violet", "Rose", "Amber", "Mint"];
     /// The playhead's colour when one was picked by hand in Settings >
     /// Appearance, in place of the palette's own. Read only while
     /// `playhead-is-custom`, and one colour under both palettes, for the
@@ -98,11 +99,12 @@ export global Theme {
     // technical` is for timecode, the ruler, clip labels, paths, dimensions,
     // counts — anything you read as a *value* rather than as language.
     //
-    // Both are Hanken Grotesk, the one face this build bundles (app.slint).
-    // The split between the roles stays so that the two can differ again
-    // without touching a single element.
-    out property <string> font: "Hanken Grotesk";
-    out property <string> font-technical: "Hanken Grotesk";
+    // Both are Inter in the Royalty Studio fork (app.slint), for a look
+    // nearer a Mac's: Hanken Grotesk is still bundled, for titles. The split
+    // between the roles stays so that the two can differ again without
+    // touching a single element.
+    out property <string> font: "Inter";
+    out property <string> font-technical: "Inter";
     /// The scale. `fs` is the body size everything inherits; the two either
     /// side of it are the dense readout and the panel title. `xl` is for the
     /// few lines that are content rather than chrome — a project's name in a
@@ -127,7 +129,9 @@ export global Theme {
     // touching a colour token, and every face is bundled, so it costs nothing
     // at runtime. Reach for it rather than nudging a surface to compensate.
     out property <int> weight-body: 400;
-    out property <int> weight-title: 500;
+    /// SemiBold: Inter is bundled without a Medium, and a Mac's titles and
+    /// buttons are set semibold anyway (Royalty Studio fork).
+    out property <int> weight-title: 600;
     /// The launch screen's heading, and the wordmark in the title bar. The one
     /// weight above `title`, and the only place the type gets to be loud. Bold
     /// is bundled, so this names it exactly.
@@ -137,8 +141,8 @@ export global Theme {
     //
     // radii
     out property <length> r-xs: 3px;
-    out property <length> r-sm: 5px;
-    out property <length> r: 7px;
+    out property <length> r-sm: 6px;
+    out property <length> r: 8px;
     out property <length> r-lg: 12px;
     /// The dialog sheet, and nothing smaller. A modal is the largest rounded
     /// thing in the window and wants a corner to match.

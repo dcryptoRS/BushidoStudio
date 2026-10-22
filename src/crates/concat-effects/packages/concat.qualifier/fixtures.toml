@@ -1,0 +1,53 @@
+# A secondary on the display level. As it rests nothing changes; the matte
+# is white on a skin tone the defaults pick and black on a blue they do
+# not, and inverts; a skin tone with its saturation taken off goes to the
+# grey of its own luma while a blue beside it keeps its colour.
+
+[[probe]]
+name = "default"
+input = [0.58535, 0.238161, 0.110903, 1]
+expect = [0.58535, 0.238161, 0.110903, 1]
+
+[[probe]]
+name = "minimum"
+at = "min"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.3, 0.2, 0.12, 1]
+
+[[probe]]
+name = "the matte takes a skin tone"
+params = { matte = 1 }
+input = [0.58535, 0.238161, 0.110903, 1]
+expect = [1, 1, 1, 1]
+
+[[probe]]
+name = "the matte leaves a blue"
+params = { matte = 1 }
+input = [0.021012, 0.055602, 0.58535, 1]
+expect = [0, 0, 0, 1]
+
+[[probe]]
+name = "an inverted matte takes the blue"
+params = { matte = 1, invert = 1 }
+input = [0.021012, 0.055602, 0.58535, 1]
+expect = [1, 1, 1, 1]
+
+[[probe]]
+name = "skin without saturation is its own grey"
+params = { saturation = 0 }
+input = [0.58535, 0.238161, 0.110903, 1]
+expect = [0.284535, 0.284535, 0.284535, 1]
+
+[[probe]]
+name = "a blue outside the matte keeps its colour"
+params = { saturation = 0 }
+input = [0.021012, 0.055602, 0.58535, 1]
+expect = [0.021012, 0.055602, 0.58535, 1]
+
+# Every knob at its top: the matte inverted and shown. The hue is in, but
+# a saturation from 100% takes nothing, so the inverted matte is white.
+[[probe]]
+name = "maximum"
+at = "max"
+input = [0.3, 0.2, 0.12, 1]
+expect = [1, 1, 1, 1]

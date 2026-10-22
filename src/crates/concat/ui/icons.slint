@@ -133,6 +133,13 @@ export enum Glyph {
     eye-off,
     /// three bars of different heights: the VU meters
     meter,
+    /// the video scopes (Royalty Studio fork)
+    scope,
+    /// the trim tools: a cut rolled, a clip slipped, a clip slid (Royalty
+    /// Studio fork)
+    roll,
+    slip,
+    slide,
     /// a microphone: the tray's voiceover
     mic,
     /// a square: stop, as on any recorder
@@ -148,6 +155,10 @@ export enum Glyph {
     skip-back,
     skip-forward,
     text-mark,
+    /// a picture and its sound edited as one, and taken apart (Royalty
+    /// Studio fork)
+    link,
+    unlink,
     // the start screen
     info,
     help,
@@ -525,6 +536,30 @@ export component Icon inherits Rectangle {
         commands: "M5 21v-6 M12 21V3 M19 21V9";
     }
 
+    // The roll: a cut with an arrow either side of it.
+    if root.glyph == Glyph.roll: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M12 4v16 M7 9l-3 3 3 3 M4 12h5 M17 9l3 3-3 3 M20 12h-5";
+    }
+
+    // The slip: a clip whose frames move inside it.
+    if root.glyph == Glyph.slip: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M4 6h16v12H4z M8 12h8 M10 10l-2 2 2 2 M14 10l2 2-2 2";
+    }
+
+    // The slide: a clip moving between two others.
+    if root.glyph == Glyph.slide: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M8 6h8v12H8z M2 6v12 M22 6v12 M5 12h-1 M20 12h-1";
+    }
+
+    // lucide/activity: the scopes
+    if root.glyph == Glyph.scope: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M22 12h-4l-3 9L9 3l-3 9H2";
+    }
+
     // lucide/mic
     if root.glyph == Glyph.mic: Stroked {
         size: root.size; tint: root.tint; weight: root.weight;
@@ -712,6 +747,21 @@ export component Icon inherits Rectangle {
     if root.glyph == Glyph.merge: Stroked {
         size: root.size; tint: root.tint; weight: root.weight;
         commands: "M8 6l4-4 4 4 M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22 M20 22l-5-5";
+    }
+
+    // lucide/link
+    if root.glyph == Glyph.link: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"
+            + " M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71";
+    }
+
+    // lucide/unlink
+    if root.glyph == Glyph.unlink: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M18.84 12.25l1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71"
+            + " M5.17 11.75l-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71"
+            + " M8 2v3 M2 8h3 M16 19v3 M19 16h3";
     }
 
     // lucide/magnet

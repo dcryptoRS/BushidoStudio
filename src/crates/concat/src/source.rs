@@ -37,6 +37,10 @@ pub struct Source {
     pub duration: f64,
     pub time: f64,
     pub playing: bool,
+    /// The stretch marked with I and O for the three-point edit, in seconds
+    /// of the file (Royalty Studio fork).
+    pub mark_in: Option<f64>,
+    pub mark_out: Option<f64>,
     /// Follows the speakers' clock while it plays.
     timer: slint::Timer,
 }
@@ -118,6 +122,8 @@ impl Studio {
             duration,
             time: 0.0,
             playing: false,
+            mark_in: None,
+            mark_out: None,
             timer: slint::Timer::default(),
         });
         if media.kind == MediaKind::Audio {
@@ -198,6 +204,8 @@ impl Studio {
             duration,
             time: 0.0,
             playing: false,
+            mark_in: None,
+            mark_out: None,
             timer: slint::Timer::default(),
         });
         self.source_toggle();
@@ -284,6 +292,7 @@ impl Studio {
             Some(source) => {
                 preview.set_open(true);
                 preview.set_name(source.name.as_str().into());
+                preview.set_marks(self.source_marks_text().into());
                 preview.set_row(source.row);
                 preview.set_card(source.card.as_str().into());
                 preview.set_time(source.time as f32);
@@ -297,6 +306,7 @@ impl Studio {
             }
             None => {
                 preview.set_open(false);
+                preview.set_marks(SharedString::new());
                 preview.set_row(-1);
                 preview.set_card(SharedString::new());
                 preview.set_playing(false);

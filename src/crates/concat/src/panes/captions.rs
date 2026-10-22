@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use concat_project::Command;
 use concat_project::model::{ClipKind, TextStyle};
+use concat_project::silence::{self, CaptionRules, SilenceRules, Word};
 use concat_project::srt;
 use concat_speech::JobStage;
 use concat_speech::transcribe::Segment;
@@ -50,6 +51,18 @@ pub enum CaptionsMsg {
     Open,
     /// A clip's menu: the sheet on that clip's voice.
     OpenOnClip(String),
+    /// The sheet as Cut Pauses (Royalty Studio fork): a clip's voice heard
+    /// word by word, and the pauses between the words taken out - the
+    /// selected clip's, or this one's.
+    OpenForPauses(Option<String>),
+    /// Word-by-word captions, a few words at a time, rather than a title a
+    /// phrase (Royalty Studio fork).
+    WordsToggled(bool),
+    /// One of the pause rules typed: 0 the shortest pause cut, 1 the air
+    /// before a word, 2 the air after one, in seconds.
+    PauseRuleChanged(i32, f32),
+    /// Take out the pauses the last run found.
+    CutPauses,
     Close,
     /// The "Use Sample Voice" switch.
     VoiceToggled(bool),
@@ -62,10 +75,12 @@ pub enum CaptionsMsg {
     /// Run the pass the sheet describes.
     Begin,
     Cancel,
-    /// The transcriber's worker reporting the stage it is in.
-    Progress(JobStage),
-    /// The transcriber's worker is done: what was said, or why not.
-    Finished(Result<Vec<Segment>, String>),
+    /// The transcriber's worker reporting the stage it is in, for run
+    /// [`CaptionsPane::run`] - an earlier run's is dropped.
+    Progress(u64, JobStage),
+    /// The transcriber's worker is done: what was said, or why not; for a
+    /// run, as `Progress` is.
+    Finished(u64, Result<Vec<Segment>, String>),
     /// Asks for a SubRip file to read in.
     ImportSrt,
     /// The SubRip file chosen: its cues as captions.
@@ -88,6 +103,9 @@ struct Subject {
     /// the sound in: what the run's timing is kept by.
     model: String,
     windows: f32,
+    /// How much of the source the clip covers, in seconds: where the
+    /// recording heard ends.
+    window: f64,
 }
 
 /// Seconds whisper takes over one thirty-second window, per megabyte of
@@ -120,6 +138,12 @@ pub struct CaptionsPane {
     /// 0 small, 1 medium, 2 large.
     pub size: usize,
     pub running: bool,
+    /// Which run the sheet is waiting on. A cancelled run's late answer
+    /// carried no mark of whose it was, so it was taken for the run started
+    /// after it: it took that run's clip, and that run's captions were never
+    /// laid (audit 2026-10-15, L8). Counts up for the life of the window,
+    /// across the sheet's reopenings.
+    run: u64,
     /// How far the running transcription looks.
     pub pace: Pace,
     /// Why the last run failed, when it did.
@@ -128,6 +152,16 @@ pub struct CaptionsPane {
     subject: Option<Subject>,
     /// How long each model took this session, for the next run's bar.
     timings: Timings,
+    /// The sheet cuts pauses rather than laying captions (Royalty Studio
+    /// fork); see [`CaptionsMsg::OpenForPauses`].
+    pub pauses: bool,
+    /// Captions word by word; see [`CaptionsMsg::WordsToggled`].
+    pub word_by_word: bool,
+    /// The pause rules, CutAndCaption's to begin with.
+    pub rules: SilenceRules,
+    /// The pauses the last run found, in timeline seconds: drawn over the
+    /// lanes until they are cut or the sheet closes.
+    pub cut: Vec<(f64, f64)>,
 }
 
 impl CaptionsPane {
@@ -137,13 +171,37 @@ impl CaptionsPane {
         match msg {
             // A run in progress is shown as it is, however the panel is
             // asked for again: closing it never stopped the run.
-            CaptionsMsg::Open | CaptionsMsg::OpenOnClip(_) if self.running => self.open = true,
+            CaptionsMsg::Open | CaptionsMsg::OpenOnClip(_) | CaptionsMsg::OpenForPauses(_)
+                if self.running =>
+            {
+                self.open = true
+            }
             CaptionsMsg::Open => {
                 let selected = studio.sole_selection();
                 self.open_on(studio, selected, false);
             }
             CaptionsMsg::OpenOnClip(id) => self.open_on(studio, Some(id), true),
-            CaptionsMsg::Close => self.open = false,
+            CaptionsMsg::OpenForPauses(clip) => {
+                let clip = clip.or_else(|| studio.sole_selection());
+                self.open_on(studio, clip, true);
+                self.pauses = true;
+            }
+            CaptionsMsg::WordsToggled(on) => self.word_by_word = on,
+            CaptionsMsg::PauseRuleChanged(which, value) => {
+                let value = f64::from(value).clamp(0.0, 10.0);
+                match which {
+                    0 => self.rules.min_silence = value,
+                    1 => self.rules.pad_in = value,
+                    _ => self.rules.pad_out = value,
+                }
+                // Found with the rules as they were: found again.
+                self.cut.clear();
+            }
+            CaptionsMsg::CutPauses => self.cut_pauses(studio),
+            CaptionsMsg::Close => {
+                self.open = false;
+                self.cut.clear();
+            }
             CaptionsMsg::VoiceToggled(on) => {
                 self.from_voice = on;
                 self.message.clear();
@@ -183,11 +241,18 @@ impl CaptionsPane {
             }
             CaptionsMsg::Cancel => {
                 studio.host.transcriber.cancel();
+                // Whatever the cancelled run still says is not for anyone.
+                self.run += 1;
                 self.running = false;
                 self.open = false;
             }
-            CaptionsMsg::Progress(stage) => self.pace.report(stage),
-            CaptionsMsg::Finished(result) => {
+            CaptionsMsg::Progress(run, stage) => {
+                if run == self.run {
+                    self.pace.report(stage);
+                }
+            }
+            CaptionsMsg::Finished(run, _) if run != self.run => {}
+            CaptionsMsg::Finished(_, result) => {
                 self.running = false;
                 let subject = self.subject.take();
                 if let (Ok(_), Some(subject)) = (&result, &subject) {
@@ -195,6 +260,41 @@ impl CaptionsPane {
                         .keep(&subject.model, self.pace.learned(subject.windows));
                 }
                 match result {
+                    Ok(segments) if self.pauses => {
+                        let Some(subject) = subject else {
+                            return;
+                        };
+                        self.found_pauses(studio, &subject, &segments);
+                    }
+                    Ok(segments) if self.word_by_word => {
+                        let Some(subject) = subject else {
+                            return;
+                        };
+                        let look = subject.look;
+                        let base = studio.prefs.title_style.clone();
+                        let words = words_of(&segments);
+                        let commands: Vec<Command> =
+                            silence::captions(&words, &CaptionRules::default())
+                                .into_iter()
+                                .map(|caption| {
+                                    caption_clip(
+                                        caption.text,
+                                        subject.start + caption.start / subject.speed,
+                                        ((caption.end - caption.start) / subject.speed).max(0.16),
+                                        look,
+                                        base.as_ref(),
+                                    )
+                                })
+                                .collect();
+                        let count = commands.len();
+                        self.open = false;
+                        if count == 0 {
+                            studio.notify(&t("captions.nothingSaidClip"), true);
+                        } else {
+                            studio.apply(Command::Batch { commands });
+                            studio.notify(&tf("captions.addedCaptions", &[&count]), false);
+                        }
+                    }
                     Ok(segments) => {
                         let Some(subject) = subject else {
                             return;
@@ -415,6 +515,9 @@ impl CaptionsPane {
             placement: 0,
             size: 1,
             timings: std::mem::take(&mut self.timings),
+            run: self.run,
+            word_by_word: self.word_by_word,
+            rules: self.rules,
             ..CaptionsPane::default()
         };
     }
@@ -432,6 +535,42 @@ impl CaptionsPane {
             self.clip.as_deref(),
             |id| sources.iter().any(|source| source.id == id),
         )
+    }
+
+    /// What the run heard, as pauses to cut (Royalty Studio fork): kept for
+    /// the lanes to show and for Cut to take out, in timeline seconds.
+    fn found_pauses(&mut self, studio: &mut Studio, subject: &Subject, segments: &[Segment]) {
+        let words = words_of(segments);
+        self.cut = silence::removed(&words, subject.window, &self.rules)
+            .into_iter()
+            .map(|(start, end)| {
+                (
+                    subject.start + start / subject.speed,
+                    subject.start + end / subject.speed,
+                )
+            })
+            .collect();
+        if self.cut.is_empty() {
+            studio.notify(&t("pauses.noneFound"), false);
+        }
+    }
+
+    /// Takes the pauses found out of the timeline, every lane at once, as
+    /// one step to undo (Royalty Studio fork).
+    fn cut_pauses(&mut self, studio: &mut Studio) {
+        if self.cut.is_empty() {
+            return;
+        }
+        let count = self.cut.len();
+        let seconds: f64 = self.cut.iter().map(|(start, end)| end - start).sum();
+        let ranges = self.cut.iter().map(|(start, end)| [*start, *end]).collect();
+        studio.apply(Command::RemoveTime { ranges });
+        self.cut.clear();
+        self.open = false;
+        studio.notify(
+            &tf("pauses.cut", &[&count, &format!("{seconds:.1}")]),
+            false,
+        );
     }
 
     /// A caption's look, by the sheet's rows: where it sits and its size.
@@ -495,6 +634,7 @@ impl CaptionsPane {
             source_start: clip.source_start,
             window: clip.duration * clip.speed,
             model_id: model.clone(),
+            words: self.pauses || self.word_by_word,
         };
         let dirs = studio.host.dirs.clone();
         let transcriber = Arc::clone(&studio.host.transcriber);
@@ -524,19 +664,24 @@ impl CaptionsPane {
             look: self.look(),
             model,
             windows,
+            window: clip.duration * clip.speed,
         });
         self.running = true;
         self.message.clear();
+        self.run += 1;
+        let run = self.run;
         let epoch = crate::host::project_epoch();
         spawn_in_project(
             move || {
                 transcriber.transcribe(&dirs, &request, move |stage| {
                     on_ui_in_project(epoch, move |studio, _, _| {
-                        studio.handle(Msg::Captions(CaptionsMsg::Progress(stage)));
+                        studio.handle(Msg::Captions(CaptionsMsg::Progress(run, stage)));
                     });
                 })
             },
-            |studio, _, _, result| studio.handle(Msg::Captions(CaptionsMsg::Finished(result))),
+            move |studio, _, _, result| {
+                studio.handle(Msg::Captions(CaptionsMsg::Finished(run, result)))
+            },
         );
     }
 
@@ -577,8 +722,29 @@ impl CaptionsPane {
             .into(),
             ready: !installed(&studio.settings.transcribers).is_empty(),
             message: self.message.as_str().into(),
+            pauses: self.pauses,
+            word_by_word: self.word_by_word,
+            min_silence: self.rules.min_silence as f32,
+            pad_in: self.rules.pad_in as f32,
+            pad_out: self.rules.pad_out as f32,
+            cut_count: self.cut.len() as i32,
+            cut_seconds: self.cut.iter().map(|(start, end)| end - start).sum::<f64>() as f32,
         }
     }
+}
+
+/// Whisper's word-by-word segments as words: a segment of one word each, as
+/// a run with `words` set gives; empty ones left out.
+fn words_of(segments: &[Segment]) -> Vec<Word> {
+    segments
+        .iter()
+        .filter(|segment| !segment.text.trim().is_empty())
+        .map(|segment| Word {
+            start: segment.start,
+            end: segment.end,
+            text: segment.text.trim().to_owned(),
+        })
+        .collect()
 }
 
 /// Imported cues keep the file's timing, including captions shorter than

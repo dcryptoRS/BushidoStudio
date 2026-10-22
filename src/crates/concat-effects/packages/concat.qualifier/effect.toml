@@ -1,0 +1,137 @@
+format = 2
+
+[effect]
+id = "concat.qualifier"
+name = "HSL Qualifier"
+kind = "effect"
+category = "Color"
+order = 16
+description = "A secondary correction: picks the part of the picture with a hue, a saturation and a brightness - a face, a sky, a shirt - and turns, saturates or brightens that part alone. Show the matte to see what it took."
+
+[[param]]
+key = "hue"
+group = "Qualifier"
+label = "Hue"
+min = 0
+max = 360
+default = 25
+step = 1
+unit = "°"
+
+[[param]]
+key = "width"
+group = "Qualifier"
+label = "Hue range"
+min = 4
+max = 180
+default = 40
+step = 1
+unit = "°"
+
+[[param]]
+key = "sat_low"
+group = "Qualifier"
+label = "Saturation from"
+min = 0
+max = 100
+default = 10
+step = 1
+unit = "%"
+
+[[param]]
+key = "sat_high"
+group = "Qualifier"
+label = "Saturation to"
+min = 0
+max = 100
+default = 100
+step = 1
+unit = "%"
+
+[[param]]
+key = "luma_low"
+group = "Qualifier"
+label = "Brightness from"
+min = 0
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "luma_high"
+group = "Qualifier"
+label = "Brightness to"
+min = 0
+max = 100
+default = 100
+step = 1
+unit = "%"
+
+[[param]]
+key = "softness"
+group = "Qualifier"
+label = "Softness"
+min = 0
+max = 50
+default = 10
+step = 1
+unit = "%"
+
+[[param]]
+key = "invert"
+group = "Qualifier"
+label = "Invert"
+type = "bool"
+min = 0
+max = 1
+default = 0
+step = 1
+
+[[param]]
+key = "matte"
+group = "Qualifier"
+label = "Show matte"
+type = "bool"
+min = 0
+max = 1
+default = 0
+step = 1
+
+[[param]]
+key = "turn"
+group = "Correction"
+label = "Hue shift"
+min = -180
+max = 180
+default = 0
+step = 1
+unit = "°"
+
+[[param]]
+key = "saturation"
+group = "Correction"
+label = "Saturation"
+min = 0
+max = 200
+default = 100
+step = 1
+unit = "%"
+
+[[param]]
+key = "brightness"
+group = "Correction"
+label = "Brightness"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[wgsl]
+entry = "effect.wgsl"
+space = "display"
+
+# The card: skin picked and warmed a little.
+[card]
+params = { turn = -6, saturation = 125 }

@@ -33,6 +33,9 @@ const ZOOM_STEP: f32 = 1.4;
 pub struct LaneView {
     pub locked: bool,
     pub size: TrackSize,
+    /// A height dragged by hand at the lane's edge, in logical pixels
+    /// (Royalty Studio fork); a size picked from the menu clears it.
+    pub height: Option<f32>,
 }
 
 impl Default for LaneView {
@@ -40,6 +43,7 @@ impl Default for LaneView {
         Self {
             locked: false,
             size: TrackSize::Auto,
+            height: None,
         }
     }
 }

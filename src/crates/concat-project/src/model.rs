@@ -44,6 +44,33 @@ pub enum MediaOrigin {
     /// A clip's sound rendered as it played - trimmed, at its speed, with
     /// its level, fades and effects baked in - as a file of its own.
     Processed,
+    /// A motion graphic rendered from a Remotion template or animation by
+    /// concat-studio, which [`MediaItem::motion`] can render again
+    /// (Royalty Studio fork).
+    Motion,
+    /// A clip or a picture made by a generating service from a prompt -
+    /// Higgsfield, Seedance, Gemini - in the Generate with AI sheet
+    /// (Royalty Studio fork).
+    Generated,
+}
+
+/// How a motion graphic was made (Royalty Studio fork): the Remotion
+/// template or animation concat-studio rendered it from, and the props it
+/// was rendered with. Enough to render it again with other props, which is
+/// what the inspector's Motion tab does, and what keeps a title made by an
+/// agent editable by hand afterwards.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Motion {
+    /// A concat-studio template ("lower-third") or one of its own
+    /// animations (src/custom/).
+    pub template: String,
+    /// The props it was rendered with: its text, colours and placement,
+    /// plus `seconds` and the frame it was rendered for (`width`, `height`,
+    /// `fps`). Opaque here; concat-studio validates them.
+    #[serde(default)]
+    pub props: Map<String, Value>,
 }
 
 /// What a clip can be - wider than [`MediaKind`] because a text clip has no
@@ -190,6 +217,12 @@ pub struct MediaItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "wire::maybe")]
     pub origin: Option<MediaOrigin>,
+    /// The recipe of a motion graphic the editor rendered, which a new
+    /// render can replace ([`crate::Command::ReplaceMotion`]). Absent, and
+    /// left out of the document, for any other media.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "wire::maybe")]
+    pub motion: Option<Motion>,
     /// Fields this build does not know, kept so a document written by a
     /// newer or a different build round-trips through this one intact.
     #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
@@ -219,6 +252,10 @@ pub struct Track {
     pub visible: bool,
     /// Audio on this track is silent when true.
     pub muted: bool,
+    /// What the lane holds (Royalty Studio fork): pictures, sound, or - on
+    /// a timeline from before lanes had a kind - anything.
+    #[serde(default, skip_serializing_if = "TrackKind::is_any")]
+    pub kind: TrackKind,
     /// Fields this build does not know, kept so they round-trip.
     #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
     pub extra: Map<String, Value>,
@@ -230,7 +267,65 @@ impl Default for Track {
             id: String::new(),
             visible: true,
             muted: false,
+            kind: TrackKind::Any,
             extra: Map::new(),
+        }
+    }
+}
+
+impl Track {
+    /// A new lane of `kind`, shown and heard.
+    pub fn of_kind(id: impl Into<String>, kind: TrackKind) -> Track {
+        Track {
+            id: id.into(),
+            kind,
+            ..Track::default()
+        }
+    }
+}
+
+/// What a lane holds (Royalty Studio fork). A timeline whose lanes have
+/// kinds is laid out as Premiere and Resolve lay theirs out: the picture
+/// lanes on top (V1 just over the line, V2 over it), the sound lanes under
+/// them (A1 just under the line, A2 under it), so `Timeline::tracks`,
+/// stored bottom first, holds every sound lane before every picture lane.
+/// A video with sound placed on such a timeline lands as two clips, the
+/// picture on a picture lane and the sound on a sound lane, linked
+/// ([`Clip::link`]).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TrackKind {
+    /// A lane from before lanes had a kind: it holds anything.
+    #[default]
+    Any,
+    /// Pictures: video, stills, titles, shapes and layers.
+    Video,
+    /// Sound.
+    Audio,
+}
+
+impl TrackKind {
+    /// A lane from before lanes had a kind.
+    pub fn is_any(&self) -> bool {
+        *self == TrackKind::Any
+    }
+
+    /// Whether a clip of `kind` may sit on a lane of this kind.
+    pub fn accepts(self, kind: ClipKind) -> bool {
+        match self {
+            TrackKind::Any => true,
+            TrackKind::Video => kind != ClipKind::Audio,
+            TrackKind::Audio => kind == ClipKind::Audio,
+        }
+    }
+
+    /// The kind of lane a clip of `kind` belongs on.
+    pub fn for_clip(kind: ClipKind) -> TrackKind {
+        if kind == ClipKind::Audio {
+            TrackKind::Audio
+        } else {
+            TrackKind::Video
         }
     }
 }
@@ -1850,6 +1945,14 @@ pub struct Clip {
     /// On a detached audio clip: the video clip the sound came from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detached_from: Option<String>,
+    /// The clips edited as one with this one (Royalty Studio fork): every
+    /// clip of the timeline with the same link is selected, moved, trimmed,
+    /// cut, retimed and deleted with it - a picture and the sound it was
+    /// recorded with, as Premiere and Resolve link them. None, or a link no
+    /// other clip shares, is a clip on its own. See
+    /// [`Timeline::partners`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
     /// The transition on the cut into this clip, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "wire::maybe")]
@@ -1971,6 +2074,7 @@ impl Clip {
             audio_stream: None,
             muted: None,
             detached_from: None,
+            link: None,
             transition_in: None,
             enhanced: None,
             text: None,
@@ -2406,9 +2510,72 @@ pub struct Timeline {
     /// [`Timeline::clip_mut`]). Reading through the `Arc` is transparent.
     #[serde(deserialize_with = "wire::list")]
     pub clips: Vec<Arc<Clip>>,
+    /// The moments marked on it, in time order (Royalty Studio fork); see
+    /// [`Marker`]. Left out of the document while there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<Marker>,
     /// Fields this build does not know, kept so they round-trip.
     #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
     pub extra: Map<String, Value>,
+}
+
+/// A moment marked on a timeline, as every editor's M marks one (Royalty
+/// Studio fork): a beat to cut on, a note for later, the start of a
+/// section. It belongs to the timeline, not to a clip, so it stays where
+/// it is put whatever moves around it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Marker {
+    /// Minted by the editor ("k7", ...).
+    pub id: String,
+    /// Seconds on the timeline.
+    pub time: f64,
+    /// What it marks; empty for one with no name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// Its colour.
+    #[serde(default)]
+    pub color: MarkerColor,
+}
+
+/// The colours a marker can be, as an editor offers them.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MarkerColor {
+    /// The default.
+    #[default]
+    Blue,
+    /// For a problem to come back to.
+    Red,
+    /// For a good take, a keeper.
+    Green,
+    /// For a beat.
+    Yellow,
+    /// For a section.
+    Purple,
+    /// For anything else.
+    Cyan,
+}
+
+impl MarkerColor {
+    /// Every colour, in the order an editor lists them.
+    pub const ALL: [MarkerColor; 6] = [
+        MarkerColor::Blue,
+        MarkerColor::Red,
+        MarkerColor::Green,
+        MarkerColor::Yellow,
+        MarkerColor::Purple,
+        MarkerColor::Cyan,
+    ];
+}
+
+impl Timeline {
+    /// The markers kept in time order, as they are read.
+    pub fn sort_markers(&mut self) {
+        self.markers.sort_by(|a, b| a.time.total_cmp(&b.time));
+    }
 }
 
 impl Default for Timeline {
@@ -2420,6 +2587,7 @@ impl Default for Timeline {
             background: Background::None,
             tracks: Vec::new(),
             clips: Vec::new(),
+            markers: Vec::new(),
             extra: Map::new(),
         }
     }
@@ -2639,6 +2807,7 @@ impl Project {
                     })
                     .collect(),
                 clips: Vec::new(),
+                markers: Vec::new(),
                 extra: Map::new(),
             })],
             active_timeline_id: "TL1".to_owned(),
@@ -2757,6 +2926,52 @@ impl Timeline {
     /// The track with this id, or None if it was removed.
     pub fn track(&self, track_id: &str) -> Option<&Track> {
         self.tracks.iter().find(|track| track.id == track_id)
+    }
+
+    /// Whether this timeline's lanes have kinds - picture lanes over sound
+    /// lanes - rather than all holding anything, as a timeline from before
+    /// kinds does.
+    pub fn is_typed(&self) -> bool {
+        self.tracks.iter().any(|track| !track.kind.is_any())
+    }
+
+    /// The kind of the lane `track_id`; [`TrackKind::Any`] for one that is
+    /// not there.
+    pub fn track_kind(&self, track_id: &str) -> TrackKind {
+        self.track(track_id)
+            .map_or(TrackKind::Any, |track| track.kind)
+    }
+
+    /// The other clips linked to `clip_id` ([`Clip::link`]): none for a
+    /// clip on its own, or one that is not on this timeline.
+    pub fn partners(&self, clip_id: &str) -> Vec<&Clip> {
+        let Some(link) = self.clip(clip_id).and_then(|clip| clip.link.as_deref()) else {
+            return Vec::new();
+        };
+        self.clips
+            .iter()
+            .filter(|other| other.id != clip_id && other.link.as_deref() == Some(link))
+            .map(Arc::as_ref)
+            .collect()
+    }
+
+    /// `ids` and every clip linked to any of them, each once, the named
+    /// ones first in their order.
+    pub fn with_partners(&self, ids: &[String]) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for id in ids {
+            if !out.contains(id) {
+                out.push(id.clone());
+            }
+        }
+        for id in ids {
+            for partner in self.partners(id) {
+                if !out.contains(&partner.id) {
+                    out.push(partner.id.clone());
+                }
+            }
+        }
+        out
     }
 
     /// The lane whose pictures have a background: the lowest lane holding a

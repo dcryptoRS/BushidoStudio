@@ -7,6 +7,7 @@ import { Glyph, Icon } from "../icons.slint";
 import { Button, CopyChip, DialogRow, DialogSection, Modal, Progress } from "../primitives/modal.slint";
 import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Select } from "../primitives/select.slint";
+import { NumberField } from "../primitives/number-field.slint";
 import { Switch } from "../inspector/controls.slint";
 
 // Captions: what the tray's Captions tool opens.
@@ -61,6 +62,19 @@ export struct CaptionsSheetData {
     ready: bool,
     /// Why the last run failed, when it did.
     message: string,
+    /// The sheet cuts the pauses out of a voice rather than laying captions
+    /// (Royalty Studio fork).
+    pauses: bool,
+    /// Captions word by word, a few at a time.
+    word-by-word: bool,
+    /// The pause rules, in seconds: the shortest pause cut, the air before
+    /// a word and after one.
+    min-silence: float,
+    pad-in: float,
+    pad-out: float,
+    /// What the last run found: how many pauses, and how long they come to.
+    cut-count: int,
+    cut-seconds: float,
 }
 
 export component CaptionsDialog inherits Modal {
@@ -78,11 +92,14 @@ export component CaptionsDialog inherits Modal {
     callback cancel();
     callback import-srt();
     callback export-srt();
+    callback words-toggled(on: bool);
+    callback pause-rule-changed(which: int, seconds: float);
+    callback cut-pauses();
 
     property <bool> from-voice: root.data.from-voice;
 
     open: root.data.open;
-    title: I18n.t("captions.captions");
+    title: root.data.pauses ? I18n.t("pauses.title") : I18n.t("captions.captions");
     glyph: Glyph.text-mark;
     surface-width: 480px;
     dismissable: !root.data.running;
@@ -103,7 +120,7 @@ export component CaptionsDialog inherits Modal {
     init => { root.draft = root.data.text; }
 
     VerticalLayout {
-        if !root.data.running && !root.from-voice: DialogSection {
+        if !root.data.running && !root.from-voice && !root.data.pauses: DialogSection {
             first: true;
             title: I18n.t("common.script");
 
@@ -176,6 +193,12 @@ export component CaptionsDialog inherits Modal {
             VerticalLayout {
                 alignment: center;
                 Switch {
+                    // A toggle sets the control's own value, which cuts its
+                    // binding to the data; this follows the data and puts
+                    // the control back, so the sheet always shows what it
+                    // will do (audit 2026-10-12, #8; Royalty Studio fork).
+                    property <bool> wanted: root.from-voice;
+                    changed wanted => { self.checked = self.wanted; }
                     checked: root.from-voice;
                     toggled(on) => { root.voice-toggled(on); }
                 }
@@ -190,6 +213,8 @@ export component CaptionsDialog inherits Modal {
                 label: I18n.t("common.audio");
                 Select {
                     options: root.data.sources;
+                    property <int> wanted: root.data.source;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.source;
                     placeholder: I18n.t("captions.noVoiceOnTimeline");
                     enabled: root.data.sources.length > 0;
@@ -201,6 +226,8 @@ export component CaptionsDialog inherits Modal {
                 label: I18n.t("common.model");
                 Select {
                     options: root.models;
+                    property <int> wanted: root.data.model;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.model;
                     placeholder: I18n.t("common.noneInstalled");
                     enabled: root.models.length > 0;
@@ -216,13 +243,88 @@ export component CaptionsDialog inherits Modal {
             }
         }
 
-        if !root.data.running: DialogSection {
+        // The pause rules (Royalty Studio fork), in seconds, as
+        // CutAndCaption had them.
+        if !root.data.running && root.data.pauses: DialogSection {
+            title: I18n.t("pauses.rules");
+
+            DialogRow {
+                label: I18n.t("pauses.minSilence");
+                NumberField {
+                    width: 96px;
+                    property <float> wanted: root.data.min-silence;
+                    changed wanted => { self.value = self.wanted; }
+                    value: root.data.min-silence;
+                    minimum: 0.05;
+                    maximum: 5;
+                    step: 0.05;
+                    precision: 2;
+                    unit: "s";
+                    changed(value) => { root.pause-rule-changed(0, value); }
+                }
+            }
+
+            DialogRow {
+                label: I18n.t("pauses.padIn");
+                NumberField {
+                    width: 96px;
+                    property <float> wanted: root.data.pad-in;
+                    changed wanted => { self.value = self.wanted; }
+                    value: root.data.pad-in;
+                    minimum: 0;
+                    maximum: 2;
+                    step: 0.05;
+                    precision: 2;
+                    unit: "s";
+                    changed(value) => { root.pause-rule-changed(1, value); }
+                }
+            }
+
+            DialogRow {
+                label: I18n.t("pauses.padOut");
+                NumberField {
+                    width: 96px;
+                    property <float> wanted: root.data.pad-out;
+                    changed wanted => { self.value = self.wanted; }
+                    value: root.data.pad-out;
+                    minimum: 0;
+                    maximum: 2;
+                    step: 0.05;
+                    precision: 2;
+                    unit: "s";
+                    changed(value) => { root.pause-rule-changed(2, value); }
+                }
+            }
+
+            Text {
+                text: root.data.cut-count > 0
+                    ? I18n.t2("pauses.found", root.data.cut-count, Math.round(root.data.cut-seconds * 10) / 10)
+                    : I18n.t("pauses.hint");
+                color: root.data.cut-count > 0 ? Theme.fg : Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+        }
+
+        if !root.data.running && !root.data.pauses: DialogSection {
             title: I18n.t("captions.captions");
+
+            if root.from-voice: DialogRow {
+                label: I18n.t("captions.wordByWord");
+                Switch {
+                    property <bool> wanted: root.data.word-by-word;
+                    changed wanted => { self.checked = self.wanted; }
+                    checked: root.data.word-by-word;
+                    toggled(on) => { root.words-toggled(on); }
+                }
+            }
 
             DialogRow {
                 label: I18n.t("captions.placement");
                 SegmentedControl {
                     options: [I18n.t("common.bottom"), I18n.t("captions.centre"), I18n.t("common.top")];
+                    property <int> wanted: root.data.placement;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.placement;
                     changed(index) => { root.placement-changed(index); }
                 }
@@ -232,6 +334,8 @@ export component CaptionsDialog inherits Modal {
                 label: I18n.t("common.size");
                 SegmentedControl {
                     options: [I18n.t("common.small"), I18n.t("common.medium"), I18n.t("common.large")];
+                    property <int> wanted: root.data.size;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.size;
                     changed(index) => { root.size-changed(index); }
                 }
@@ -239,7 +343,9 @@ export component CaptionsDialog inherits Modal {
 
             Text {
                 text: root.from-voice
-                    ? I18n.t("captions.oneTitlePerPhrase")
+                    ? (root.data.word-by-word
+                        ? I18n.t("captions.wordByWordHint")
+                        : I18n.t("captions.oneTitlePerPhrase"))
                     : I18n.t("captions.oneTitlePerSentence");
                 color: Theme.fg-dim;
                 font-size: Theme.fs-sm;
@@ -336,7 +442,28 @@ export component CaptionsDialog inherits Modal {
                 }
             }
 
-            if !root.data.running: Button {
+            // Cut Pauses: found first, drawn over the lanes, then cut.
+            if !root.data.running && root.data.pauses && root.data.cut-count > 0: Button {
+                block: true;
+                primary: true;
+                large: true;
+                glyph: Glyph.razor;
+                label: I18n.t1("pauses.cutButton", root.data.cut-count);
+                clicked => { root.cut-pauses(); }
+            }
+
+            if !root.data.running && root.data.pauses: Button {
+                block: true;
+                primary: root.data.cut-count == 0;
+                ghost: root.data.cut-count > 0;
+                large: root.data.cut-count == 0;
+                glyph: Glyph.waveform;
+                label: root.data.cut-count > 0 ? I18n.t("pauses.findAgain") : I18n.t("pauses.find");
+                enabled: root.data.ready && root.data.source >= 0;
+                clicked => { root.begin(); }
+            }
+
+            if !root.data.running && !root.data.pauses: Button {
                 block: true;
                 primary: true;
                 large: true;
@@ -350,7 +477,7 @@ export component CaptionsDialog inherits Modal {
             // look above, timed as the file says; or a lane of titles
             // written out: the selected title's lane, or with none
             // selected the lane with the most titles, the captions'.
-            if !root.data.running: HorizontalLayout {
+            if !root.data.running && !root.data.pauses: HorizontalLayout {
                 spacing: 8px;
 
                 Button {

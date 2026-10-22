@@ -1,0 +1,358 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Button, CopyChip, DialogRow, DialogSection, Modal } from "../primitives/modal.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
+import { Select } from "../primitives/select.slint";
+import { NumberField } from "../primitives/number-field.slint";
+import { Switch } from "../inspector/controls.slint";
+
+// Generate with AI (Royalty Studio fork): a clip or a picture made from a
+// prompt by Higgsfield, Seedance or Gemini, and a clip from the frame under
+// the playhead as well. What it makes lands in the bin under Generated and
+// on the timeline at the playhead. A card floating over the editor on a
+// desk, as Text to speech is, so the timeline stays in reach while a
+// request runs - which can take minutes.
+
+export struct GenerateSheetData {
+    open: bool,
+    /// a picture rather than a clip
+    picture: bool,
+    /// row of `services`
+    service: int,
+    /// "Higgsfield · bytedance/seedance-2.5", for what the sheet makes
+    services: [string],
+    prompt: string,
+    /// a clip from the frame under the playhead
+    from-frame: bool,
+    frame-offered: bool,
+    /// seconds
+    duration: int,
+    /// 0 480p, 1 720p, 2 1080p
+    resolution: int,
+    /// 0 16:9, 1 9:16, 2 1:1, 3 4:3, 4 3:4, 5 21:9
+    aspect: int,
+    /// with sound made for it
+    audio: bool,
+    /// 0 1K, 1 2K, 2 4K: Gemini's sizes
+    size: int,
+    size-offered: bool,
+    /// the chosen service has its key in Settings
+    keyed: bool,
+    running: bool,
+    /// why the last run failed, or what is missing
+    message: string,
+}
+
+export component GenerateDialog inherits Modal {
+    in property <GenerateSheetData> data;
+
+    callback prompt-edited(text: string);
+    /// One of the choices, by name: "kind", "service", "frame",
+    /// "duration", "resolution", "aspect", "audio", "size". A switch is 0
+    /// or 1.
+    callback changed(field: string, value: int);
+    callback begin();
+    callback cancel();
+    callback open-settings();
+
+    open: root.data.open;
+    title: I18n.t("generate.title");
+    glyph: Glyph.sparkle;
+    surface-width: 500px;
+
+    // The prompt being typed, held apart from the data as the speech
+    // sheet's script is: re-seeded when it changes and never while typed.
+    property <string> draft;
+    property <bool> typing;
+    changed data => {
+        if (!root.typing) {
+            root.draft = root.data.prompt;
+        }
+    }
+    init => { root.draft = root.data.prompt; }
+
+    /// Seconds since the request was sent.
+    property <int> elapsed;
+    property <bool> running: root.data.running;
+    changed running => { root.elapsed = 0; }
+    Timer {
+        interval: 1s;
+        running: root.running;
+        triggered => { root.elapsed += 1; }
+    }
+
+    VerticalLayout {
+        if !root.data.running: DialogSection {
+            first: true;
+            title: I18n.t("generate.make");
+
+            SegmentedControl {
+                options: [I18n.t("generate.clip"), I18n.t("generate.picture")];
+                property <int> wanted: root.data.picture ? 1 : 0;
+                changed wanted => { self.current = self.wanted; }
+                current: root.data.picture ? 1 : 0;
+                changed(index) => { root.changed("kind", index); }
+            }
+
+            DialogRow {
+                label: I18n.t("generate.service");
+                Select {
+                    options: root.data.services;
+                    property <int> wanted: root.data.service;
+                    changed wanted => { self.current = self.wanted; }
+                    current: root.data.service;
+                    changed(index) => { root.changed("service", index); }
+                }
+            }
+        }
+
+        if !root.data.running: DialogSection {
+            title: I18n.t("generate.prompt");
+            hint: root.data.picture ? I18n.t("generate.promptHintPicture") : I18n.t("generate.promptHintClip");
+
+            Rectangle {
+                height: 112px;
+                border-radius: Theme.r;
+                background: Theme.well;
+                border-width: 1px;
+                border-color: prompt.has-focus ? Theme.accent : Theme.line;
+                clip: true;
+
+                prompt := TextInput {
+                    x: 10px;
+                    y: 8px;
+                    width: parent.width - 20px;
+                    height: parent.height - 16px;
+                    text <=> root.draft;
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    single-line: false;
+                    wrap: word-wrap;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.on-accent;
+                    changed has-focus => { root.typing = self.has-focus; }
+                    edited => { root.prompt-edited(self.text); }
+                }
+
+                if root.draft == "" && !prompt.has-focus: Text {
+                    x: 10px;
+                    y: 8px;
+                    width: parent.width - 20px;
+                    text: root.data.picture ? I18n.t("generate.placeholderPicture") : I18n.t("generate.placeholderClip");
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-lg;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if !root.data.running: DialogSection {
+            title: I18n.t("generate.shape");
+
+            DialogRow {
+                label: I18n.t("generate.aspect");
+                SegmentedControl {
+                    options: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+                    property <int> wanted: root.data.aspect;
+                    changed wanted => { self.current = self.wanted; }
+                    current: root.data.aspect;
+                    changed(index) => { root.changed("aspect", index); }
+                }
+            }
+
+            if !root.data.picture: DialogRow {
+                label: I18n.t("generate.resolution");
+                SegmentedControl {
+                    options: ["480p", "720p", "1080p"];
+                    property <int> wanted: root.data.resolution;
+                    changed wanted => { self.current = self.wanted; }
+                    current: root.data.resolution;
+                    changed(index) => { root.changed("resolution", index); }
+                }
+            }
+
+            if !root.data.picture: DialogRow {
+                label: I18n.t("generate.duration");
+                NumberField {
+                    width: 96px;
+                    minimum: 4;
+                    maximum: 30;
+                    step: 1;
+                    precision: 0;
+                    unit: "s";
+                    property <float> wanted: root.data.duration;
+                    changed wanted => { self.value = self.wanted; }
+                    value: root.data.duration;
+                    changed(seconds) => { root.changed("duration", seconds); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            if root.data.size-offered: DialogRow {
+                label: I18n.t("generate.size");
+                SegmentedControl {
+                    options: ["1K", "2K", "4K"];
+                    property <int> wanted: root.data.size;
+                    changed wanted => { self.current = self.wanted; }
+                    current: root.data.size;
+                    changed(index) => { root.changed("size", index); }
+                }
+            }
+
+            if root.data.frame-offered: DialogRow {
+                label: I18n.t("generate.fromFrame");
+                Text {
+                    horizontal-stretch: 1;
+                    text: I18n.t("generate.fromFrameHint");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Switch {
+                        property <bool> wanted: root.data.from-frame;
+                        changed wanted => { self.checked = self.wanted; }
+                        checked: root.data.from-frame;
+                        toggled(on) => { root.changed("frame", on ? 1 : 0); }
+                    }
+                }
+            }
+
+            if !root.data.picture: DialogRow {
+                label: I18n.t("generate.sound");
+                Text {
+                    horizontal-stretch: 1;
+                    text: I18n.t("generate.soundHint");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Switch {
+                        property <bool> wanted: root.data.audio;
+                        changed wanted => { self.checked = self.wanted; }
+                        checked: root.data.audio;
+                        toggled(on) => { root.changed("audio", on ? 1 : 0); }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+
+            // No key for the service: said where the button is, with the
+            // way to Settings beside it.
+            if !root.data.keyed && !root.data.running: Rectangle {
+                border-radius: Theme.r;
+                background: Theme.well;
+
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: I18n.t("generate.needsKey");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Button {
+                            label: I18n.t("generate.openSettings");
+                            clicked => { root.open-settings(); }
+                        }
+                    }
+                }
+            }
+
+            if root.data.message != "": Rectangle {
+                border-radius: Theme.r;
+                background: Theme.danger-soft;
+
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.data.message;
+                        color: Theme.danger;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                    VerticalLayout {
+                        alignment: start;
+                        CopyChip { text: root.data.message; }
+                    }
+                }
+            }
+
+            if root.data.running: HorizontalLayout {
+                spacing: 8px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.data.picture ? I18n.t("generate.makingPicture") : I18n.t("generate.makingClip");
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "\{Math.floor(root.elapsed / 60)}:"
+                        + (Math.mod(root.elapsed, 60) < 10 ? "0" : "")
+                        + "\{Math.mod(root.elapsed, 60)}";
+                    color: Theme.fg-dim;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                }
+            }
+
+            if root.data.running: Text {
+                text: I18n.t("generate.runningHint");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+
+            if root.data.running: HorizontalLayout {
+                alignment: start;
+                Button {
+                    label: I18n.t("generate.stopWaiting");
+                    glyph: Glyph.close;
+                    ghost: true;
+                    clicked => { root.cancel(); }
+                }
+            }
+
+            if !root.data.running: Button {
+                block: true;
+                primary: true;
+                large: true;
+                glyph: Glyph.sparkle;
+                label: root.data.picture ? I18n.t("generate.makePicture") : I18n.t("generate.makeClip");
+                enabled: root.data.keyed && root.draft != "";
+                clicked => { root.begin(); }
+            }
+        }
+    }
+}

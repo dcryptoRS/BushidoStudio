@@ -119,7 +119,7 @@ component AddMenu inherits Rectangle {
     list := PopupWindow {
         x: 0;
         y: root.height + 4px;
-        width: 168px;
+        width: 210px;
         height: 2 * root.row-h + 8px;
         close-policy: close-on-click-outside;
 
@@ -190,6 +190,10 @@ export component TimelineTray inherits Rectangle {
     callback tool-changed(tool: TimelineTool);
     callback snap-changed(snap: bool);
     callback magnetic-changed(on: bool);
+    /// Linked selection (Royalty Studio fork): a picture and its sound
+    /// taken along together.
+    in property <bool> linked: true;
+    callback linked-changed(on: bool);
     callback pan-changed(on: bool);
     callback trim-follow-changed(on: bool);
     callback preview-axis-changed(on: bool);
@@ -275,6 +279,38 @@ export component TimelineTray inherits Rectangle {
             clicked => {
                 root.tool-changed(root.tool == TimelineTool.split
                     ? TimelineTool.select : TimelineTool.split);
+            }
+        }
+        // The trim tools (Royalty Studio fork), on R, Y and U: a cut rolled,
+        // a clip slipped inside itself, a clip slid between its neighbours.
+        TrayButton {
+            glyph: Glyph.roll;
+            label: I18n.t("shortcuts.rollTool");
+            icon-size: 16px;
+            checked: root.tool == TimelineTool.roll;
+            clicked => {
+                root.tool-changed(root.tool == TimelineTool.roll
+                    ? TimelineTool.select : TimelineTool.roll);
+            }
+        }
+        TrayButton {
+            glyph: Glyph.slip;
+            label: I18n.t("shortcuts.slipTool");
+            icon-size: 16px;
+            checked: root.tool == TimelineTool.slip;
+            clicked => {
+                root.tool-changed(root.tool == TimelineTool.slip
+                    ? TimelineTool.select : TimelineTool.slip);
+            }
+        }
+        TrayButton {
+            glyph: Glyph.slide;
+            label: I18n.t("shortcuts.slideTool");
+            icon-size: 16px;
+            checked: root.tool == TimelineTool.slide;
+            clicked => {
+                root.tool-changed(root.tool == TimelineTool.slide
+                    ? TimelineTool.select : TimelineTool.slide);
             }
         }
         // Delete left and Delete right, as in CapCut's toolbar: the clip under
@@ -390,6 +426,15 @@ export component TimelineTray inherits Rectangle {
             checked: root.magnetic;
             clicked => { root.magnetic-changed(!root.magnetic); }
         }
+        // Linked selection, as Premiere's chain: lit, a picture and its
+        // sound are selected and edited together (Royalty Studio fork).
+        TrayButton {
+            glyph: root.linked ? Glyph.link : Glyph.unlink;
+            label: I18n.t("tray.linkedSelection");
+            icon-size: 16px;
+            checked: root.linked;
+            clicked => { root.linked-changed(!root.linked); }
+        }
 
         Divider { }
 
@@ -398,8 +443,17 @@ export component TimelineTray inherits Rectangle {
             label: I18n.t("tray.generateCaptions");
             icon-size: 16px;
             // On while the panel is up; a second press puts it away.
-            checked: Editor.captions-open;
+            checked: Editor.captions-open && !Editor.pauses-open;
             clicked => { root.captions(); }
+        }
+        // Cut Pauses (Royalty Studio fork): the voice heard word by word
+        // and the pauses between the words taken out of every lane.
+        TrayButton {
+            glyph: Glyph.razor;
+            label: I18n.t("tray.cutPauses");
+            icon-size: 16px;
+            checked: Editor.pauses-open;
+            clicked => { Editor.pauses-tool(); }
         }
         TrayButton {
             glyph: Glyph.volume;
@@ -407,6 +461,15 @@ export component TimelineTray inherits Rectangle {
             icon-size: 16px;
             checked: Editor.speech-open;
             clicked => { root.speak(); }
+        }
+        // A clip or a picture made from a prompt, or from the frame under
+        // the playhead (Royalty Studio fork).
+        TrayButton {
+            glyph: Glyph.sparkle;
+            label: I18n.t("tray.generateAi");
+            icon-size: 16px;
+            checked: Editor.generate-open;
+            clicked => { Editor.generate(); }
         }
         // A voiceover: the picture rolls from the playhead and the words go
         // onto a lane under it. The same button stops the take.

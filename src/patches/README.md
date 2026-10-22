@@ -24,6 +24,9 @@ changes, all marked `Concat:` in the source:
   desk's ClearType settings (on or off, RGB or BGR), so its text is drawn
   with ClearType as the system's own is. A texture rendered to stays
   greyscale.
+  Royalty Studio fork: on Linux the positions stay subpixel at every scale
+  and the hinting is slight (vertical only), as the desktop's own text is:
+  whole-pixel glyphs at 1x left the spacing off by a pixel a letter.
 - `itemrenderer.rs`, `create_layer_target`: a layer's surface is created with
   default props, so text in a transparent, cached layer is greyscale
   rather than inheriting the window's subpixel order.
@@ -60,7 +63,9 @@ And the copy is smaller than the published crate: ggml's GPU backends that
 no build of Concat compiles (CANN, CUDA, Hexagon, HIP, MUSA, OpenCL, RPC,
 SYCL, Vulkan, WebGPU, zDNN, ZenDNN) are left out of
 `whisper.cpp/ggml/src`, so the crate's `cuda`, `hipblas`, `vulkan` and
-`intel-sycl` features no longer build. CMake only enters a backend's folder
+`intel-sycl` features no longer build. Royalty Studio fork: `ggml-cuda` is back,
+  from the published whisper-rs-sys 0.15.0 (the same whisper.cpp 1.8.3), so
+  the `cuda` feature builds again: Whisper runs on an NVIDIA card. CMake only enters a backend's folder
 when that backend is turned on. `Cargo.lock` and the crate's registry
 metadata files are left out too. Nothing else differs from the published
 crate.

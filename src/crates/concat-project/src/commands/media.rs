@@ -8,6 +8,10 @@
 
 use super::*;
 
+/// How near a clip's in-point and length must be to the render's for the
+/// clip to count as showing the whole of it, in seconds: well under a frame.
+const WHOLE_TOLERANCE: f64 = 1e-3;
+
 /// Applies one of this module's commands. Any other is a routing error.
 pub(super) fn apply(
     project: &mut Project,
@@ -39,6 +43,7 @@ pub(super) fn apply(
                 has_audio: item.has_audio,
                 audio_tracks: item.audio_tracks,
                 origin: item.origin,
+                motion: item.motion,
                 placeholder: false,
                 color_range: None,
                 color_space: item.color_space,
@@ -126,6 +131,94 @@ pub(super) fn apply(
             Ok(Outcome {
                 created_id: None,
                 applied: true,
+            })
+        }
+
+        Command::ReplaceMotion { media_id, item } => {
+            let media = project
+                .media
+                .iter_mut()
+                .find(|existing| existing.id == media_id)
+                .ok_or(CommandError::MediaGone)?;
+            let before = media.clone();
+            let old_length = media.duration;
+            // The id stays, so every clip of it stays placed; what is behind
+            // the id is the new render. The bin name stays the user's: each
+            // render's file name is stamped, and a rename is theirs to keep.
+            media.path = item.path;
+            media.duration = item.duration;
+            media.kind = item.kind;
+            media.width = item.width;
+            media.height = item.height;
+            media.frame_rate = item.frame_rate;
+            media.frame_rate_fraction = item.frame_rate_fraction;
+            media.video_codec = item.video_codec;
+            media.audio_codec = item.audio_codec;
+            media.has_audio = item.has_audio;
+            media.audio_tracks = item.audio_tracks;
+            media.color_space = item.color_space;
+            media.origin = Some(MediaOrigin::Motion);
+            if item.motion.is_some() {
+                media.motion = item.motion;
+            }
+            let mut applied = *media != before;
+            let new_length = media.duration;
+            let kind = match media.kind {
+                MediaKind::Video => ClipKind::Video,
+                MediaKind::Audio => ClipKind::Audio,
+                MediaKind::Image => ClipKind::Image,
+            };
+
+            // All timelines, as a fill is: the bin is the project's.
+            for timeline in project.timelines.iter_mut() {
+                if !timeline.clips.iter().any(|clip| clip.media_id == media_id) {
+                    continue;
+                }
+                let timeline = Arc::make_mut(timeline);
+                let ids: Vec<String> = timeline
+                    .clips
+                    .iter()
+                    .filter(|clip| clip.media_id == media_id)
+                    .map(|clip| clip.id.clone())
+                    .collect();
+                for id in ids {
+                    let (_, next) = timeline.room_around(&id).unwrap_or((0.0, f64::INFINITY));
+                    let Some(clip) = timeline.clip_mut(&id) else {
+                        continue;
+                    };
+                    applied |= assign(&mut clip.kind, kind);
+                    // A clip whose speed curves keeps its cut: its length
+                    // in source seconds is the curve's, not one division.
+                    let (Some(new_length), None) = (new_length, &clip.speed_curve) else {
+                        continue;
+                    };
+                    let speed = clip.speed;
+                    // The whole render, as clip_add places it, follows the
+                    // new one's length; a cut from it keeps its in- and
+                    // out-points as far as the new length allows.
+                    let whole = old_length.is_some_and(|old| {
+                        clip.source_start <= WHOLE_TOLERANCE
+                            && (clip.duration * speed - old).abs() <= WHOLE_TOLERANCE
+                    });
+                    let source_start = clip
+                        .source_start
+                        .min((new_length - MIN_CLIP_DURATION * speed).max(0.0));
+                    let room = (new_length - source_start) / speed;
+                    let duration = if whole { room } else { clip.duration.min(room) }
+                        .min(next - clip.start)
+                        .max(MIN_CLIP_DURATION);
+                    let old = clip.duration;
+                    let changed = assign(&mut clip.source_start, source_start)
+                        | assign(&mut clip.duration, duration);
+                    if changed {
+                        clip.rewindow_keys(old, 0.0, duration);
+                        applied = true;
+                    }
+                }
+            }
+            Ok(Outcome {
+                created_id: None,
+                applied,
             })
         }
 

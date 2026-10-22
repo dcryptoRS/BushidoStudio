@@ -167,6 +167,11 @@ toml = "1.1"
 # JPEG encoding for the media artwork cache.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
+[features]
+# Transcription on an NVIDIA card; see concat-speech's `cuda` (Royalty
+# Studio fork).
+cuda = ["concat-speech/cuda"]
+
 [build-dependencies]
 slint-build = "1.18"
 # The .exe's icon, for Explorer and the Start menu, as a Windows resource.

@@ -521,11 +521,22 @@ impl Studio {
             .unwrap_or_else(|| panic!("clip {id} is on the timeline"))
     }
 
+    /// The clips a person picks on the timeline: pictures, and sounds on
+    /// their own - not the sound linked to a picture, which every edit of
+    /// the picture takes along (Royalty Studio fork). So each test here
+    /// edits as before, and its export checks the linked sound as well.
     fn clip_ids(&self) -> Vec<String> {
-        self.project()
-            .active()
+        let timeline = self.project().active();
+        timeline
             .clips
             .iter()
+            .filter(|clip| {
+                clip.kind != concat_project::model::ClipKind::Audio
+                    || timeline
+                        .partners(&clip.id)
+                        .iter()
+                        .all(|partner| partner.kind == concat_project::model::ClipKind::Audio)
+            })
             .map(|clip| clip.id.clone())
             .collect()
     }
@@ -1749,8 +1760,11 @@ fn every_edit_still_exports() {
     exported.expect_second(23.5, 1);
     exported.expect_quiet(19.0);
 
+    // A sound lane: on picture and sound lanes, the one added at the
+    // bottom (Royalty Studio fork). One on top holds pictures, and the
+    // sounds named for it would go to a sound lane of their own.
     let sound_track = studio
-        .apply(Command::AddTrack { bottom: false })
+        .apply(Command::AddTrack { bottom: true })
         .expect("a new track has an id");
     studio.apply(Command::AddClip {
         media_id: aac,

@@ -46,6 +46,8 @@ pub enum StartMsg {
     OpenChosen(PathBuf),
     OpenRecent(String),
     ForgetRecent(String),
+    /// The project's folder to the Trash, and off the list (Royalty Studio fork).
+    TrashRecent(String),
     /// Show a project's folder in the file manager.
     RevealRecent(String),
     /// What the projects' search field holds now.
@@ -321,6 +323,22 @@ impl StartPane {
             StartMsg::RevealRecent(path) => {
                 if let Err(error) = platform::reveal(&path) {
                     studio.notify(&error, true);
+                }
+            }
+            StartMsg::TrashRecent(path) => {
+                let name = Path::new(&path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone());
+                match platform::trash_project(&path) {
+                    Ok(()) => {
+                        if let Err(error) = projects::forget(&studio.host.dirs.config, &path) {
+                            log::warn!("start: trashed {path} but could not forget it: {error}");
+                        }
+                        studio.recents = projects::recents(&studio.host.dirs.config);
+                        studio.notify(&tf("start.movedToTrash", &[&name]), false);
+                    }
+                    Err(error) => studio.notify(&tf("start.couldNotTrash", &[&name, &error]), true),
                 }
             }
             StartMsg::SearchEdited(query) => self.query = query,

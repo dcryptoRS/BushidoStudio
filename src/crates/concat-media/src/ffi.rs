@@ -100,9 +100,46 @@ unsafe extern "C" fn relay(
     }
     if level <= ffmpeg::sys::AV_LOG_FATAL {
         log::error!(target: "ffmpeg", "{text}");
+    } else if level <= ffmpeg::sys::AV_LOG_ERROR && from_an_encoder(text) {
+        // An encoder that will not open says why only here: the `Result`
+        // says that it would not, and nothing more (audit 2026-10-15, M9).
+        // Encoders say so once per open, not per packet as a decoder's
+        // reference errors do, so these cannot flood the log.
+        log::warn!(target: "ffmpeg", "{text}");
     } else {
         log::debug!(target: "ffmpeg", "{text}");
     }
+}
+
+/// Whether a formatted FFmpeg line comes from an encoder: its prefix,
+/// `[name @ 0x...]`, names one of the encoders an export or a proxy opens.
+fn from_an_encoder(text: &str) -> bool {
+    let Some(name) = text
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once(" @ "))
+        .map(|(name, _)| name)
+    else {
+        return false;
+    };
+    const ENCODERS: &[&str] = &[
+        "libx264",
+        "libx265",
+        "libsvtav1",
+        "libaom-av1",
+        "librav1e",
+        "libvpx",
+        "libvpx-vp9",
+    ];
+    const FAMILIES: &[&str] = &[
+        "_nvenc",
+        "_vaapi",
+        "_qsv",
+        "_amf",
+        "_mf",
+        "_mediacodec",
+        "_videotoolbox",
+    ];
+    ENCODERS.contains(&name) || FAMILIES.iter().any(|family| name.ends_with(family))
 }
 
 /// The version of FFmpeg this binary is linked against.
@@ -240,6 +277,20 @@ pub(crate) fn displayed(width: u32, height: u32, degrees: i64) -> (u32, u32) {
 
 #[cfg(test)]
 mod tests {
+    use super::from_an_encoder;
+
+    #[test]
+    fn an_encoders_line_is_told_from_a_decoders() {
+        assert!(from_an_encoder(
+            "[h264_nvenc @ 0x55d0] OpenEncodeSessionEx failed: out of memory"
+        ));
+        assert!(from_an_encoder("[libsvtav1 @ 0x1] Error"));
+        assert!(!from_an_encoder(
+            "[h264 @ 0x55d0] mmco: unref short failure"
+        ));
+        assert!(!from_an_encoder("no prefix at all"));
+    }
+
     use super::*;
 
     #[test]

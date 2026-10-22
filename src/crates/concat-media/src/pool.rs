@@ -535,10 +535,19 @@ type HeldStills = (
     std::collections::VecDeque<PathBuf>,
 );
 
-/// How many in-memory stills the pool keeps. Each is a frame, mostly
-/// transparent, at the monitor's size; a drag makes a few dozen a second
-/// and shows one.
+/// How many in-memory stills the pool always keeps. Each is a frame,
+/// mostly transparent, at the monitor's size; a drag makes a few dozen a
+/// second and shows one.
 const STILLS_HELD: usize = 24;
+
+/// How many bytes of in-memory stills the pool may keep past
+/// [`STILLS_HELD`]: the titles' own ceiling for the paintings of the titles
+/// on the timeline (concat-host's `LIVE_CEILING`), whose pixels these are -
+/// the pool holds the same frames, not copies. Kept to a count of 24, a
+/// timeline with more titles than that lost the oldest from the monitor
+/// while one of them was dragged: auto-captions make dozens (audit
+/// 2026-10-12, #5).
+const STILLS_BYTES: usize = 512 * 1024 * 1024;
 
 impl ReaderPool {
     /// A pool with `cache_bytes` of frame cache and up to `max_readers` warm
@@ -621,19 +630,26 @@ impl ReaderPool {
         doomed.len()
     }
 
-    /// Makes `frame` the still at `path`, a name no file has, until
-    /// [`STILLS_HELD`] newer ones have come. Frames already cut from an
+    /// Makes `frame` the still at `path`, a name no file has, until newer
+    /// ones have pushed it past [`STILLS_HELD`] and [`STILLS_BYTES`]. Frames already cut from an
     /// earlier still of that name are let go, so the name never shows
     /// stale pixels.
     pub fn hold_still(&self, path: &Path, frame: Arc<Frame>) {
         if let Ok(mut held) = self.memory.lock() {
             let (stills, order) = &mut *held;
-            if stills.insert(path.to_path_buf(), frame).is_none() {
-                order.push_back(path.to_path_buf());
-            }
-            while order.len() > STILLS_HELD {
-                if let Some(oldest) = order.pop_front() {
-                    stills.remove(&oldest);
+            stills.insert(path.to_path_buf(), frame);
+            // The most recently held last: a title held on every pass stays,
+            // where it used to keep the place it was first held in and go
+            // once enough newer names had come, still in use.
+            order.retain(|name| name != path);
+            order.push_back(path.to_path_buf());
+            let mut bytes: usize = stills.values().map(|still| still.pixels().len()).sum();
+            while order.len() > STILLS_HELD && bytes > STILLS_BYTES {
+                let Some(oldest) = order.pop_front() else {
+                    break;
+                };
+                if let Some(gone) = stills.remove(&oldest) {
+                    bytes -= gone.pixels().len();
                 }
             }
         }
@@ -1308,6 +1324,25 @@ pub(crate) mod tests {
             255,
             "the old cut is gone with the old still"
         );
+    }
+
+    /// Sixty titles held at once - auto-captions - all stay, and the one
+    /// held first and again since is not the one to go (audit 2026-10-12,
+    /// #5: past 24, the oldest dropped out of a drag).
+    #[test]
+    fn more_titles_than_twenty_four_stay_held() {
+        let pool = ReaderPool::new(64 * 1024 * 1024, 2);
+        let name = |n: usize| PathBuf::from(format!("memory://titles/{n}"));
+        for n in 0..60 {
+            pool.hold_still(&name(n), Arc::new(Frame::black(64, 32)));
+            pool.hold_still(&name(0), Arc::new(Frame::black(64, 32)));
+        }
+        for n in 0..60 {
+            assert!(
+                pool.held_still(&name(n)).is_some(),
+                "title {n} is still held"
+            );
+        }
     }
 
     #[test]

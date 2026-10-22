@@ -343,6 +343,10 @@ export component VoiceoverPanel inherits Rectangle {
 
                 Select {
                     options: root.devices;
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.data.device;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.device;
                     glyph: Glyph.mic;
                     placeholder: root.data.waiting ? I18n.t("voiceover.opening")
@@ -532,6 +536,10 @@ export component VoiceoverPanel inherits Rectangle {
                             I18n.t("voiceover.steady"),
                             I18n.t("voiceover.fast"),
                         ];
+                        // A pick sets the control's own value, cutting this binding: this
+                        // follows the data and puts it back (audit 2026-10-12, #8).
+                        property <int> wanted: root.data.prompt-speed;
+                        changed wanted => { self.current = self.wanted; }
                         current: root.data.prompt-speed;
                         changed(index) => { root.prompt-speed-changed(index); }
                     }

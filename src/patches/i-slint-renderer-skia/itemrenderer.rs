@@ -1124,8 +1124,20 @@ impl GlyphRenderer for SkiaItemRenderer<'_> {
         // order from the one Rust calls it with - Skia read a garbage `this`
         // and the window crashed on its first frame of text. `props` fills
         // an out-parameter and returns a bool, which both sides agree on.
-        let dense = self.scale_factor.get() >= 1.5;
-        font.set_subpixel(dense);
+        //
+        // Royalty Studio fork: not on Linux. There every glyph rounded to a
+        // pixel of its own put the spacing off by up to a pixel a letter at
+        // the interface's 12 and 13 px - "Vo z" for "Voz", "co rta" - which
+        // reads worse than the softness it saves. The Linux desktop's own
+        // text (GNOME, Chrome) is placed to the subpixel and hinted in the
+        // vertical only, FreeType's slight hinting: the baseline and the
+        // x-height stay on the pixel grid and the spacing is the font's.
+        let linux = cfg!(target_os = "linux");
+        let whole_pixels = !linux && self.scale_factor.get() < 1.5;
+        font.set_subpixel(!whole_pixels);
+        if linux {
+            font.set_hinting(skia_safe::FontHinting::Slight);
+        }
         let lcd = self
             .canvas
             .props()

@@ -16,6 +16,7 @@ import {
     CurveData, CurveGroupData, WheelData, WheelGroupData,
 } from "../inspector/grading.slint";
 import { TextPanel } from "../inspector/text-panel.slint";
+import { MotionPanel } from "../inspector/motion-panel.slint";
 import {
     ClipField, ClipKind, ClipTextField, SelectedClipData, SelectedTransitionData,
 } from "../timeline/model.slint";
@@ -240,6 +241,9 @@ export component ConfigPane inherits Rectangle {
         : root.is-shape ? ["Video"]
         : root.is-image ? ["Video", "Effects"]
         : root.is-audio ? ["Audio"]
+        // A motion graphic (Royalty Studio fork) opens on its recipe; an
+        // overlay has no sound, so Audio gives way to it.
+        : root.selected.motion ? ["Motion", "Video", "Effects"]
         : ["Video", "Audio", "Effects"];
     /// The same tabs in the interface's language. `tabs` stays English,
     /// because the panels are picked by comparing against it.
@@ -248,6 +252,7 @@ export component ConfigPane inherits Rectangle {
         : root.is-shape ? [I18n.t("configPane.vectorImage")]
         : root.is-image ? [I18n.t("common.video"), I18n.t("common.effects")]
         : root.is-audio ? [I18n.t("common.audio")]
+        : root.selected.motion ? ["Motion", I18n.t("common.video"), I18n.t("common.effects")]
         : [I18n.t("common.video"), I18n.t("common.audio"), I18n.t("common.effects")];
     /// A one-segment segmented control is a label wearing a costume, so a lone
     /// tab renders as the panel's plain heading instead.
@@ -286,6 +291,7 @@ export component ConfigPane inherits Rectangle {
             ? (root.selected.batch-volume ? ["Sound"] : ["Sound", "AudioEffects"])
         : root.heading == "Effects" ? ["Effects"]
         : root.heading == "Text" ? ["Text"]
+        : root.heading == "Motion" ? ["Motion"]
         : ["Layer", "Adjust", "Effects"];
     /// The sections as the dropdown shows them; see `tabs-shown`.
     property <[string]> sections-shown: root.heading == "Video"
@@ -296,6 +302,7 @@ export component ConfigPane inherits Rectangle {
                 : [I18n.t("configPane.basic"), I18n.t("configPane.audioEffects")])
         : root.heading == "Effects" ? [I18n.t("common.effects")]
         : root.heading == "Text" ? [I18n.t("common.text")]
+        : root.heading == "Motion" ? ["Motion"]
         : [I18n.t("common.layer"), I18n.t("common.adjust"), I18n.t("common.effects")];
 
     // Each tab remembers its own section, so flipping to Audio and back
@@ -338,7 +345,7 @@ export component ConfigPane inherits Rectangle {
                 : root.jump-section == "Effects" ? 2 : 0;
             return;
         }
-        if (root.jump-tab == "Video") { root.tab = 0; }
+        if (root.jump-tab == "Video") { root.tab = root.selected.motion ? 1 : 0; }
         else if (root.jump-tab == "Audio") { root.tab = root.is-audio ? 0 : 1; }
         else if (root.jump-tab == "Effects") { root.tab = root.tabs.length - 1; }
         // Enhance sits second in the Video tab for a video and a still
@@ -687,6 +694,8 @@ export component ConfigPane inherits Rectangle {
                     curve-remove(key, point) => { root.curve-remove(-1, key, point); }
                     commit => { root.clip-commit(); }
                 }
+
+                if root.showing == "Motion": MotionPanel { }
 
                 if root.showing == "Layer": FilterPanel {
                     selected: root.selected;

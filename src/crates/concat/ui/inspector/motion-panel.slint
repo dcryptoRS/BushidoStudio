@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+// The Motion tab (Royalty Studio fork): a motion graphic's recipe as fields,
+// and Apply to render it again with them. The fields, what they hold and the
+// render's progress come from `src/motion.rs` through the `Motion` global, the
+// way the Claude pane reads `Claude`: nothing is threaded through the config
+// pane.
+
+import { I18n } from "../i18n.slint";
+import { Row, Section, SectionBody, SectionHeader } from "../primitives/panel.slint";
+import { Button, Field, Progress } from "../primitives/modal.slint";
+import { NumberField } from "../primitives/number-field.slint";
+import { Select } from "../primitives/select.slint";
+import { Note, SwitchRow } from "controls.slint";
+
+/// One of the recipe's props, as the tab edits it.
+export struct MotionField {
+    key: string,
+    label: string,
+    /// What concat-studio says the prop is for.
+    hint: string,
+    /// 0 text, 1 number, 2 switch, 3 a choice of `options`
+    kind: int,
+    text: string,
+    number: float,
+    minimum: float,
+    maximum: float,
+    step: float,
+    precision: int,
+    on: bool,
+    options: [string],
+    current: int,
+}
+
+export global Motion {
+    /// The template's name, and what it is for.
+    in property <string> title;
+    in property <string> description;
+    in property <[MotionField]> fields;
+    /// There are edits Apply would render.
+    in property <bool> dirty;
+    /// A render is running; `progress` is how far, 0 to 1.
+    in property <bool> busy;
+    in property <float> progress;
+    /// What the tab has to say: an error, a frame that is not the
+    /// timeline's, fields only Claude can change.
+    in property <string> note;
+
+    callback text-edited(key: string, text: string);
+    callback number-changed(key: string, value: float);
+    callback toggled(key: string, on: bool);
+    callback picked(key: string, index: int);
+    callback apply();
+    callback revert();
+}
+
+export component MotionPanel inherits VerticalLayout {
+    property <length> label-w: 96px;
+
+    Section {
+        first: true;
+        SectionHeader {
+            title: Motion.title;
+        }
+        SectionBody {
+            if Motion.description != "": Note {
+                text: Motion.description;
+            }
+
+            for field in Motion.fields: VerticalLayout {
+                if field.kind == 0: Row {
+                    label: field.label;
+                    label-width: root.label-w;
+                    Field {
+                        value: field.text;
+                        placeholder: field.hint;
+                        edited(text) => { Motion.text-edited(field.key, text); }
+                    }
+                }
+                if field.kind == 1: Row {
+                    label: field.label;
+                    label-width: root.label-w;
+                    NumberField {
+                        value: field.number;
+                        minimum: field.minimum;
+                        maximum: field.maximum;
+                        step: field.step;
+                        precision: field.precision;
+                        changed(value) => { Motion.number-changed(field.key, value); }
+                    }
+                }
+                if field.kind == 2: SwitchRow {
+                    label: field.label;
+                    checked: field.on;
+                    toggled(on) => { Motion.toggled(field.key, on); }
+                }
+                if field.kind == 3: Row {
+                    label: field.label;
+                    label-width: root.label-w;
+                    Select {
+                        options: field.options;
+                        current: field.current;
+                        changed(index) => { Motion.picked(field.key, index); }
+                    }
+                }
+            }
+
+            if Motion.busy: Row {
+                label: "";
+                label-width: root.label-w;
+                Progress {
+                    value: Motion.progress;
+                    live: true;
+                }
+            }
+
+            Row {
+                label: "";
+                label-width: root.label-w;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button {
+                        label: Motion.busy ? I18n.t("motion.rendering") : I18n.t("motion.apply");
+                        primary: true;
+                        enabled: Motion.dirty && !Motion.busy;
+                        clicked => { Motion.apply(); }
+                    }
+                    if Motion.dirty && !Motion.busy: Button {
+                        label: I18n.t("motion.discard");
+                        ghost: true;
+                        clicked => { Motion.revert(); }
+                    }
+                }
+            }
+
+            if Motion.note != "": Note {
+                text: Motion.note;
+            }
+        }
+    }
+}

@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { Button, DialogSection, Field, Modal } from "../primitives/modal.slint";
+
+// A marker named, coloured or taken off (Royalty Studio fork): what a
+// double-click on its flag, or M on the playhead over it, opens. The name
+// is kept as the sheet goes; a colour is kept at once.
+
+export struct MarkerSheetData {
+    open: bool,
+    name: string,
+    /// a row of the six colours: blue, red, green, yellow, purple, cyan
+    color: int,
+    /// where it is, as a timecode
+    time: string,
+}
+
+export component MarkerDialog inherits Modal {
+    in property <MarkerSheetData> data;
+
+    callback name-edited(text: string);
+    callback color-chosen(index: int);
+    callback deleted();
+
+    open: root.data.open;
+    title: I18n.t("marker.title");
+    note: root.data.time;
+    surface-width: 380px;
+
+    property <[color]> tints: [#0a84ff, #ff453a, #30d158, #ffd60a, #bf5af2, #64d2ff];
+
+    VerticalLayout {
+        DialogSection {
+            first: true;
+            title: I18n.t("marker.name");
+            Field {
+                value: root.data.name;
+                placeholder: I18n.t("marker.namePlaceholder");
+                edited(text) => { root.name-edited(text); }
+            }
+        }
+
+        DialogSection {
+            title: I18n.t("marker.color");
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                for tint[index] in root.tints: Rectangle {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 12px;
+                    background: tint;
+                    border-width: index == root.data.color ? 2px : 0px;
+                    border-color: Theme.fg;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.color-chosen(index); }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            padding: 16px;
+            spacing: 8px;
+            Button {
+                label: I18n.t("marker.delete");
+                glyph: Glyph.trash;
+                danger: true;
+                clicked => { root.deleted(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                label: I18n.t("marker.done");
+                primary: true;
+                clicked => { root.closed(); }
+            }
+        }
+    }
+}

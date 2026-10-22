@@ -82,6 +82,24 @@ pub struct Preferences {
     /// edge, so the monitor shows the exact frame the cut lands on. Off by
     /// default; the tray's button beside the hand turns it on.
     pub trim_follow: bool,
+    /// A video placed on lanes with kinds puts its sound on a sound lane,
+    /// as a clip of its own linked to the picture (Royalty Studio fork).
+    /// `None` is on; see [`Preferences::splits_audio`].
+    pub split_audio: Option<bool>,
+    /// A click on a clip takes the clips linked to it along - selected with
+    /// it, moved, trimmed, cut and deleted with it - as Premiere's linked
+    /// selection does (Royalty Studio fork). Off, every clip is its own;
+    /// Alt does the same for one click. `None` is on.
+    pub linked_selection: Option<bool>,
+    /// Every change saved to the project a moment after it is made, as
+    /// DaVinci Resolve's Live Save does (Royalty Studio fork). Off, the
+    /// project is written by Save, closing with changes asks first, and a
+    /// recovery copy keeps the changes if the window dies. `None` is on.
+    pub autosave: Option<bool>,
+    /// Which scope the Scopes pane shows: 0 waveform, 1 parade, 2
+    /// vectorscope, 3 histogram, 4 all four (Royalty Studio fork). `None`
+    /// is the waveform.
+    pub scope_view: Option<i32>,
     /// The preview axis: the monitor shows the frame under the pointer as
     /// it crosses the lanes, the playhead staying where it is. Off by
     /// default: a monitor that jumps with the pointer startles whoever has
@@ -117,12 +135,48 @@ pub struct Preferences {
     /// How the voiceover panel was last set up.
     #[serde(default)]
     pub voiceover: VoiceoverPrefs,
+    /// The Claude panel and the generated media: who the assistant works
+    /// for, where their material is, what it must never touch, and which
+    /// model each service is asked for (Royalty Studio fork). The keys are
+    /// not here but in a file of their own only its owner may read.
+    #[serde(default)]
+    pub assistant: AssistantPrefs,
     /// Rebound shortcuts, by action id: the chord each was given, or ""
     /// for an action a rebind left with none. Absent is the shipped
     /// chord — the file holds what moved, not the whole table. Written
     /// by Settings › Shortcuts; resolved in [`crate::keymap`].
     #[serde(default)]
     pub keybinds: BTreeMap<String, String>,
+}
+
+/// Settings > Assistant and AI, but the keys (see `concat_host::genai::Keys`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AssistantPrefs {
+    /// What the assistant calls the person it edits for; empty is no name.
+    pub name: String,
+    /// Folders the footage, music and pictures are in, which the assistant
+    /// is told about and may read; `~` is the home folder.
+    pub footage: Vec<String>,
+    /// What the panel's guard refuses to delete, overwrite or stop: a folder (a path,
+    /// everything inside it) or a name (in any path or command, any case).
+    pub protected: Vec<String>,
+    /// concat-studio's MCP server, when it is not where it installs itself.
+    pub studio: Option<String>,
+    /// The model each generating service is asked for.
+    pub models: concat_host::genai::Models,
+}
+
+impl AssistantPrefs {
+    /// A text of one entry per line, as the Settings page edits a list, put
+    /// back into the list: blank lines and edge spaces dropped.
+    pub fn lines(text: &str) -> Vec<String> {
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
 }
 
 /// The voiceover panel's choices, kept from one take to the next and one
@@ -158,6 +212,22 @@ impl Default for VoiceoverPrefs {
 }
 
 impl Preferences {
+    /// Whether a video's sound lands on a sound lane of its own; see
+    /// `split_audio`.
+    pub fn splits_audio(&self) -> bool {
+        self.split_audio.unwrap_or(true)
+    }
+
+    /// Whether every change is saved as it is made; see `autosave`.
+    pub fn autosaves(&self) -> bool {
+        self.autosave.unwrap_or(true)
+    }
+
+    /// Whether linked clips are taken along; see `linked_selection`.
+    pub fn links_selection(&self) -> bool {
+        self.linked_selection.unwrap_or(true)
+    }
+
     /// Whether the timeline shows its VU meters; see `vu_meters`.
     pub fn meters_shown(&self) -> bool {
         self.vu_meters.unwrap_or(true)

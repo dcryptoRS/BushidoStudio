@@ -1263,16 +1263,21 @@ dependencies = [
  "tempfile",
  "ureq 2.12.1",
  "windows-sys 0.61.2",
+ "zbus",
 ]
 
 [[package]]
 name = "concat-mcp"
 version = "0.2.8"
 dependencies = [
+ "base64 0.22.1",
  "concat-api",
  "concat-effects",
+ "concat-host",
  "concat-media",
+ "concat-project",
  "concat-server",
+ "png 0.17.16",
  "serde_json",
  "tempfile",
 ]

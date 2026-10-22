@@ -1334,6 +1334,10 @@ export component VideoPanel inherits VerticalLayout {
                 label: I18n.t("common.mode");
                 Select {
                     options: root.blends;
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.selected.blend;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.selected.blend;
                     changed(index) => { root.set(ClipField.blend, index); root.commit(); }
                 }
@@ -1341,12 +1345,20 @@ export component VideoPanel inherits VerticalLayout {
 
             SwitchRow {
                 label: I18n.t("clipInspector.flipHorizontal");
+                // A pick sets the control's own value, cutting this binding: this
+                // follows the data and puts it back (audit 2026-10-12, #8).
+                property <bool> wanted: root.selected.flip-h;
+                changed wanted => { self.checked = self.wanted; }
                 checked: root.selected.flip-h;
                 toggled(on) => { root.set(ClipField.flip-h, on ? 1 : 0); root.commit(); }
             }
 
             SwitchRow {
                 label: I18n.t("clipInspector.flipVertical");
+                // A pick sets the control's own value, cutting this binding: this
+                // follows the data and puts it back (audit 2026-10-12, #8).
+                property <bool> wanted: root.selected.flip-v;
+                changed wanted => { self.checked = self.wanted; }
                 checked: root.selected.flip-v;
                 toggled(on) => { root.set(ClipField.flip-v, on ? 1 : 0); root.commit(); }
             }
@@ -1406,6 +1418,10 @@ export component VideoPanel inherits VerticalLayout {
 
             SwitchRow {
                 label: I18n.t("clipInspector.tripod");
+                // A pick sets the control's own value, cutting this binding: this
+                // follows the data and puts it back (audit 2026-10-12, #8).
+                property <bool> wanted: root.selected.stabilize-tripod;
+                changed wanted => { self.checked = self.wanted; }
                 checked: root.selected.stabilize-tripod;
                 toggled(on) => { root.set(ClipField.stabilize-tripod, on ? 1 : 0); root.commit(); }
             }
@@ -1460,6 +1476,10 @@ export component VideoPanel inherits VerticalLayout {
                 label: I18n.t("clipInspector.subject");
                 Select {
                     options: [I18n.t("common.auto"), I18n.t("clipInspector.person"), I18n.t("clipInspector.object")];
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.selected.cutout-subject;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.selected.cutout-subject;
                     changed(index) => { root.cutout-subject(index); }
                 }
@@ -1704,6 +1724,10 @@ export component VideoPanel inherits VerticalLayout {
 
             if root.mask >= 0: SwitchRow {
                 label: I18n.t("mask.invert");
+                // A pick sets the control's own value, cutting this binding: this
+                // follows the data and puts it back (audit 2026-10-12, #8).
+                property <bool> wanted: root.selected.mask-invert;
+                changed wanted => { self.checked = self.wanted; }
                 checked: root.selected.mask-invert;
                 toggled(on) => { root.set(ClipField.mask-invert, on ? 1 : 0); root.commit(); }
             }
@@ -2001,6 +2025,10 @@ export component EnhancePanel inherits VerticalLayout {
                         !root.selected.enhance-fits-2x,
                         !root.selected.enhance-fits-4x,
                     ];
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.selected.enhance-size;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.selected.enhance-size;
                     enabled: root.live;
                     changed(index) => { root.enhance-size(index); }
@@ -2197,6 +2225,10 @@ export component AudioPanel inherits VerticalLayout {
             label: I18n.t("clipInspector.audioTrack");
             Select {
                 options: root.audio-tracks;
+                // A pick sets the control's own value, cutting this binding: this
+                // follows the data and puts it back (audit 2026-10-12, #8).
+                property <int> wanted: root.selected.audio-track;
+                changed wanted => { self.current = self.wanted; }
                 current: root.selected.audio-track;
                 changed(index) => {
                     root.set(ClipField.audio-track, index);

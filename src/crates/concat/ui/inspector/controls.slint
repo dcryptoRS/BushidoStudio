@@ -533,11 +533,11 @@ export component Switch inherits Rectangle {
 
     callback toggled(checked: bool);
 
-    width: 30px;
-    height: 17px;
-    // Softly squared, not a pill: the thumb's corners sit concentric with
-    // the track's, 2px in.
-    border-radius: Theme.r-sm;
+    width: 32px;
+    height: 19px;
+    // A pill with a round white thumb that casts a little shadow, as an
+    // iPhone's switch is (Royalty Studio fork; Concat's was squared).
+    border-radius: self.height / 2;
     background: root.checked ? Theme.accent : Theme.field-active;
     opacity: root.enabled ? 1.0 : 0.45;
 
@@ -546,12 +546,15 @@ export component Switch inherits Rectangle {
     thumb := Rectangle {
         x: root.checked ? parent.width - self.width - 2px : 2px;
         y: (parent.height - self.height) / 2;
-        width: 13px;
-        height: 13px;
-        border-radius: Theme.r-xs;
-        background: Theme.on-accent;
+        width: 15px;
+        height: 15px;
+        border-radius: self.height / 2;
+        background: #ffffff;
+        drop-shadow-blur: 3px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: #00000059;
 
-        animate x { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+        animate x { duration: 160ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
     }
 
     touch := TouchArea {

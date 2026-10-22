@@ -1,0 +1,54 @@
+format = 2
+
+[effect]
+id = "concat.legal"
+name = "Broadcast Safe"
+kind = "effect"
+category = "Color"
+order = 18
+description = "Holds the picture inside legal levels for delivery: luma no higher than the ceiling and no lower than the floor, the brightest highlights eased in over the softness rather than cut, and colour no richer than the limit. Put it last, on an adjustment layer over everything."
+
+[[param]]
+key = "ceiling"
+label = "Ceiling"
+min = 80
+max = 100
+default = 100
+step = 1
+unit = "%"
+
+[[param]]
+key = "floor"
+label = "Floor"
+min = 0
+max = 10
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "softness"
+label = "Softness"
+min = 0
+max = 20
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "chroma"
+label = "Colour limit"
+min = 50
+max = 100
+default = 100
+step = 1
+unit = "%"
+
+[wgsl]
+entry = "effect.wgsl"
+space = "display"
+
+# The card: the highlights eased under 85% and the colour held to 60%, so
+# the still shows what a limiter takes.
+[card]
+params = { ceiling = 85, softness = 20, chroma = 60 }

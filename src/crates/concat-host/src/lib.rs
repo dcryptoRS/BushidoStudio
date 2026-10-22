@@ -27,6 +27,7 @@ pub mod cutout;
 pub mod dirs;
 pub mod enhance;
 pub mod export;
+pub mod genai;
 pub mod jobs;
 pub mod lock;
 pub mod logs;
@@ -40,6 +41,8 @@ pub mod projects;
 pub mod proxy;
 pub mod record;
 pub mod reverse;
+#[cfg(target_os = "linux")]
+pub mod secrets;
 pub mod session;
 pub mod sounds;
 pub mod stabilize;

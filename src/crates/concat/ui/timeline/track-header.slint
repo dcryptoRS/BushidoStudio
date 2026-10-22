@@ -10,12 +10,11 @@ import { TrackData, TrackSize } from "model.slint";
 
 // The lane switches, in a fixed column beside the lanes.
 //
-// No label on a row: the lanes are untyped, so there is no kind to name, and
-// a lane's place in the stack is the only handle anything needs on it.
-//
-// Both a visibility and a mute toggle on every row, because a track is not
-// typed — the same lane can be carrying a video clip and an mp3 side by side,
-// and each needs its own switch.
+// A lane with a kind (Royalty Studio fork) carries its name - V1 up from the
+// line between pictures and sound, A1 down from it - and a sound lane no
+// visibility toggle, since it shows nothing. A lane from before kinds has no
+// name: it can carry a video clip and an mp3 side by side, and needs both
+// switches.
 //
 // The column scrolls with the lanes rather than on its own: the offset is the
 // caller's `track-scroll`, so the labels and the lanes cannot drift apart.
@@ -215,10 +214,16 @@ component MoreMenu inherits Rectangle {
 component Header inherits Rectangle {
     in property <TrackData> track;
     in property <bool> removable;
+    /// Which edge drags the lane's height (Royalty Studio fork): 0 the
+    /// bottom, 1 the top - a picture lane hangs from the line under it, so
+    /// it grows upwards, from the edge it shares with the lane above.
+    in property <int> grip: 0;
 
     callback flag-changed(visible: bool, muted: bool, locked: bool);
     callback sized(size: TrackSize);
     callback removed();
+    /// The lane dragged to `height` at its edge.
+    callback resized(height: length);
 
     Rectangle {
         x: 0;
@@ -228,12 +233,29 @@ component Header inherits Rectangle {
         background: Theme.line;
     }
 
+
     row := TouchArea {
         HorizontalLayout {
             padding-left: 8px;
             padding-right: 4px;
             padding-top: 6px;
             spacing: 1px;
+
+            if root.track.label != "": VerticalLayout {
+                alignment: start;
+                Rectangle {
+                    width: 24px;
+                    height: 24px;
+                    Text {
+                        text: root.track.label;
+                        color: root.track.kind == 2 ? Theme.fg-muted : Theme.fg;
+                        font-size: Theme.fs-xs;
+                        font-weight: Theme.weight-title;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
             // No `alignment: start` here. A start-aligned row gives every
             // child its preferred width and stops stretching altogether — and
             // the spacer's preferred width is nothing, so the two ends would
@@ -271,7 +293,7 @@ component Header inherits Rectangle {
                 }
             }
 
-            VerticalLayout {
+            if root.track.kind != 2: VerticalLayout {
                 alignment: start;
                 IconButton {
                     // Checked when the lane is *off*: the button is lit to say
@@ -315,6 +337,32 @@ component Header inherits Rectangle {
             }
         }
     }
+
+    // The lane's edge, taken hold of to size it, as a track boundary is in
+    // Premiere (Royalty Studio fork). The pointer is read in window terms:
+    // a lane that grows upwards moves this edge with it.
+    edge := TouchArea {
+        x: 0;
+        y: root.grip == 1 ? 0px : root.height - 5px;
+        width: root.width;
+        height: 5px;
+        mouse-cursor: row-resize;
+        property <length> from-y;
+        property <length> from-h;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                self.from-y = self.absolute-position.y + self.mouse-y;
+                self.from-h = root.track.height;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.resized(root.grip == 1
+                    ? self.from-h - (self.absolute-position.y + self.mouse-y - self.from-y)
+                    : self.from-h + (self.absolute-position.y + self.mouse-y - self.from-y));
+            }
+        }
+    }
 }
 
 export component TrackHeaders inherits Rectangle {
@@ -327,6 +375,25 @@ export component TrackHeaders inherits Rectangle {
     /// than measured here: the pane already works it out to clamp the offset,
     /// and two answers to one question is one answer too many.
     in property <length> overflow;
+    /// The line between pictures and sound, as the lanes have it; see
+    /// `Lanes.video-rows` (Royalty Studio fork).
+    in property <int> video-rows: 0;
+    in property <length> split;
+    in property <length> video-offset;
+    in property <length> audio-offset;
+    property <length> rows-h: Math.max(0px, root.height - root.ruler-height);
+
+    pure function shift(row: int) -> length {
+        return root.video-rows <= 0 ? -root.track-scroll
+            : (row < root.video-rows ? root.video-offset : root.audio-offset);
+    }
+    pure function area-top(row: int) -> length {
+        return root.video-rows > 0 && row >= root.video-rows ? root.split : 0px;
+    }
+    pure function area-h(row: int) -> length {
+        return root.video-rows <= 0 ? root.rows-h
+            : (row < root.video-rows ? root.split : root.rows-h - root.split);
+    }
 
     /// The bar was dragged, or the column wheeled. Absolute, and already
     /// inside 0..overflow.
@@ -335,6 +402,10 @@ export component TrackHeaders inherits Rectangle {
     callback flag-changed(index: int, visible: bool, muted: bool, locked: bool);
     callback sized(index: int, size: TrackSize);
     callback removed(index: int);
+    callback resized(index: int, height: length);
+    /// A wheel over one side of the line, `y` down the rows; see
+    /// `Lanes.track-scrolled`.
+    callback track-scrolled(pixels: length, y: length);
 
     clip: true;
 
@@ -348,6 +419,12 @@ export component TrackHeaders inherits Rectangle {
             if (event.delta-y == 0px) {
                 return EventResult.reject;
             }
+            // Each side of the line scrolls on its own, the one the pointer
+            // is over.
+            if (root.video-rows > 0) {
+                root.track-scrolled(-event.delta-y, self.mouse-y - root.ruler-height);
+                return EventResult.accept;
+            }
             // Negated because Slint's delta-y is positive scrolling *up*,
             // and up is a smaller offset. Clamped here the way the pane
             // clamps the lanes' wheel, so the two never disagree.
@@ -356,23 +433,41 @@ export component TrackHeaders inherits Rectangle {
             return EventResult.accept;
         }
 
-        for track[index] in root.tracks: Header {
+        // Each row inside its side of the line, which clips it, as the
+        // lanes clip theirs.
+        for track[index] in root.tracks: Rectangle {
             x: 0;
-            y: root.ruler-height + track.top - root.track-scroll;
+            y: root.ruler-height + root.area-top(index);
             width: parent.width;
-            height: track.height;
-            // Clipped to the stack rather than allowed to ride over the ruler,
-            // which a scrolled row would otherwise do.
-            visible: self.y + track.height > root.ruler-height && self.y < root.height;
+            height: root.area-h(index);
+            clip: true;
 
-            track: track;
-            removable: root.tracks.length > 1;
+            Header {
+                x: 0;
+                y: track.top + root.shift(index) - root.area-top(index);
+                width: parent.width;
+                height: track.height;
+                visible: self.y + track.height > 0 && self.y < parent.height;
 
-            flag-changed(visible, muted, locked) => {
-                root.flag-changed(index, visible, muted, locked);
+                track: track;
+                removable: root.tracks.length > 1;
+                grip: root.video-rows > 0 && index < root.video-rows ? 1 : 0;
+
+                flag-changed(visible, muted, locked) => {
+                    root.flag-changed(index, visible, muted, locked);
+                }
+                sized(size) => { root.sized(index, size); }
+                removed => { root.removed(index); }
+                resized(height) => { root.resized(index, height); }
             }
-            sized(size) => { root.sized(index, size); }
-            removed => { root.removed(index); }
+        }
+
+        if root.video-rows > 0: Rectangle {
+            x: 0;
+            y: root.ruler-height + root.split - 1px;
+            width: parent.width;
+            height: 2px;
+            background: Theme.line-strong;
         }
 
         // The bar, over the rows and under the corner. On the trailing edge,
@@ -380,7 +475,7 @@ export component TrackHeaders inherits Rectangle {
         // Short and inset rather than full-height: a stack that overflows by a
         // row would otherwise draw a thumb the length of the column, and a mark
         // that long stops reading as something you can take hold of.
-        ThinScrollbar {
+        if root.video-rows <= 0: ThinScrollbar {
             x: parent.width - self.width - 1px;
             y: root.ruler-height + 4px;
             height: Math.max(0px, root.height - root.ruler-height - 8px);

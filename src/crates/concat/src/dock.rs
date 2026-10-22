@@ -55,6 +55,7 @@ fn kind_name(kind: PaneKind) -> &'static str {
         PaneKind::Timeline => "timeline",
         PaneKind::Keyframes => "keyframes",
         PaneKind::Claude => "claude",
+        PaneKind::Scopes => "scopes",
     }
 }
 
@@ -66,6 +67,7 @@ fn kind_named(name: &str) -> Option<PaneKind> {
         "timeline" => PaneKind::Timeline,
         "keyframes" => PaneKind::Keyframes,
         "claude" => PaneKind::Claude,
+        "scopes" => PaneKind::Scopes,
         _ => return None,
     })
 }

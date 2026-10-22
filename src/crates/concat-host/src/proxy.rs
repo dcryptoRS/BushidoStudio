@@ -217,7 +217,8 @@ pub fn write(
     // NVDEC in, NVENC out - and the CPU stays with playback. A laptop's
     // chip is a scarcer thing, and there the copy keeps to the CPU as
     // before (Royalty Studio fork).
-    let on_card = concat_media::hardware::hardware_device() == Some(concat_media::HwDevice::Cuda);
+    let on_card = concat_media::hardware::hardware_device() == Some(concat_media::HwDevice::Cuda)
+        && !on_a_battery();
     let options = DecodeOptions::default()
         .scaled_to(width, height)
         .threaded(2)
@@ -274,6 +275,21 @@ pub fn write(
             Err(error)
         }
     }
+}
+
+/// Whether this machine runs on a battery: a laptop, whose NVIDIA chip is
+/// the second of two and the one libcuda has been seen to crash on when a
+/// proxy opened it in the background (audit 2026-10-15, N3, #309). There a
+/// proxy keeps to the CPU. Linux says so under `/sys/class/power_supply`;
+/// elsewhere nothing here asks.
+fn on_a_battery() -> bool {
+    std::fs::read_dir("/sys/class/power_supply")
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|entry| entry.file_name().to_string_lossy().starts_with("BAT"))
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

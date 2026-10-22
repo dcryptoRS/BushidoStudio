@@ -8,8 +8,46 @@
 
 use super::*;
 
-/// Applies one of this module's commands. Any other is a routing error.
+/// Applies one of this module's commands, as `scope` says: a retime is the
+/// linked clips' too (Royalty Studio fork), so a picture and its sound
+/// stay the same length. Any other command is a routing error.
 pub(super) fn apply(
+    project: &mut Project,
+    mint: &mut IdMint,
+    command: Command,
+    scope: Scope,
+) -> Result<Outcome, CommandError> {
+    let clip_id = match &command {
+        Command::SetClipSpeed { clip_id, .. } | Command::SetClipSpeedCurve { clip_id, .. }
+            if !scope.alone =>
+        {
+            clip_id.clone()
+        }
+        _ => return apply_one(project, mint, command),
+    };
+    let mut applied = false;
+    for id in project.active().with_partners(&[clip_id]) {
+        let each = match &command {
+            Command::SetClipSpeed { speed, .. } => Command::SetClipSpeed {
+                clip_id: id,
+                speed: *speed,
+            },
+            Command::SetClipSpeedCurve { curve, .. } => Command::SetClipSpeedCurve {
+                clip_id: id,
+                curve: curve.clone(),
+            },
+            _ => unreachable!("matched above"),
+        };
+        applied |= apply_one(project, mint, each)?.applied;
+    }
+    Ok(Outcome {
+        created_id: None,
+        applied,
+    })
+}
+
+/// One of this module's commands on the clip it names alone.
+fn apply_one(
     project: &mut Project,
     _mint: &mut IdMint,
     command: Command,

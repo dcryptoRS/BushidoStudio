@@ -65,6 +65,10 @@ pub struct Monitor {
     early: Arc<Mutex<Vec<PathBuf>>>,
     #[cfg(feature = "gpu")]
     gpu: Option<Arc<Mutex<concat_render::WgpuCompositor>>>,
+    /// The scopes, on the same device, made the first time they are asked
+    /// for (Royalty Studio fork).
+    #[cfg(feature = "gpu")]
+    scopes: Arc<Mutex<Option<concat_render::scopes::Scopes>>>,
 }
 
 /// One kept plan and what it was built for.
@@ -81,6 +85,10 @@ struct PlanEntry {
 #[cfg(feature = "gpu")]
 pub use concat_render::wgpu;
 
+/// What [`Monitor::scopes_of`] can draw, and what it gives back.
+#[cfg(feature = "gpu")]
+pub use concat_render::scopes;
+
 impl Default for Monitor {
     fn default() -> Self {
         Self::new()
@@ -96,6 +104,8 @@ impl Monitor {
             early: Arc::new(Mutex::new(Vec::new())),
             #[cfg(feature = "gpu")]
             gpu: None,
+            #[cfg(feature = "gpu")]
+            scopes: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -111,6 +121,7 @@ impl Monitor {
             gpu: Some(Arc::new(Mutex::new(
                 concat_render::WgpuCompositor::with_device(device, queue),
             ))),
+            scopes: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -258,6 +269,30 @@ impl Monitor {
         }
         gpu.render_texture(sources.plan())
             .ok_or_else(|| "the GPU device was lost".to_owned())
+    }
+
+    /// The scopes in `wanted` (see `concat_render::scopes`) of a frame
+    /// [`Monitor::texture_of`] drew, worked out on the same device and
+    /// submitted to the same queue. As with that, call it from the thread
+    /// that owns the device (Royalty Studio fork).
+    #[cfg(feature = "gpu")]
+    pub fn scopes_of(
+        &self,
+        frame: &wgpu::Texture,
+        wanted: u32,
+    ) -> Result<concat_render::scopes::ScopeImages, String> {
+        let gpu = self
+            .gpu
+            .as_ref()
+            .ok_or_else(|| "the monitor has no GPU device".to_owned())?;
+        let gpu = gpu.lock().map_err(|_| "compositor poisoned".to_owned())?;
+        let mut scopes = self
+            .scopes
+            .lock()
+            .map_err(|_| "scopes poisoned".to_owned())?;
+        let scopes = scopes
+            .get_or_insert_with(|| concat_render::scopes::Scopes::new(gpu.device(), gpu.queue()));
+        Ok(scopes.draw(frame, wanted))
     }
 
     /// The plan for this clip list at this size and rate: the kept one

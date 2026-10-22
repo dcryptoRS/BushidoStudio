@@ -31,7 +31,7 @@ use concat_host::session::EditorView;
 use concat_host::templates::TemplateInfo;
 use concat_host::{AppDirs, ProjectInfo};
 use concat_project::Command;
-use concat_project::model::VideoSettings;
+use concat_project::model::{Motion, VideoSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -156,6 +156,31 @@ pub enum Request {
         path: String,
         /// The file to import.
         file: String,
+        /// How the file was made, when it is a motion graphic concat-studio
+        /// rendered (its `overlay_render` gives this): kept with the item,
+        /// so it can be rendered again with other props - from the
+        /// window's Motion tab, or with `media.replaceMotion` (Royalty
+        /// Studio fork).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        motion: Option<Motion>,
+    },
+    /// Puts a new render of a motion graphic in place of the old one, as
+    /// one undoable edit (Royalty Studio fork): the bin item keeps its id,
+    /// so its clips stay where they are; a clip that showed the whole of the
+    /// old render shows the whole of the new one, as far as the next clip
+    /// on its lane, and a cut from it keeps its cut.
+    #[serde(rename = "media.replaceMotion")]
+    MediaReplaceMotion {
+        /// The project folder.
+        path: String,
+        /// The motion graphic's bin item.
+        media_id: String,
+        /// The new render.
+        file: String,
+        /// The recipe the new render was made from; the old one is kept
+        /// when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        motion: Option<Motion>,
     },
 
     /// Every effect package the build knows, with its parameters, so a

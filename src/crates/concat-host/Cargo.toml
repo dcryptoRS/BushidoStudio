@@ -49,6 +49,11 @@ memmap2 = "0.9"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The desktop's keyring, over the session bus (secrets.rs; Royalty Studio
+# fork). Already in the tree through the accessibility bridge.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
   "Win32_Media",

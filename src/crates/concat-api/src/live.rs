@@ -23,7 +23,6 @@
 use std::sync::Arc;
 
 use concat_host::Session;
-use concat_host::media;
 use concat_host::session::EditorView;
 use concat_project::Command;
 
@@ -60,6 +59,7 @@ pub(crate) fn project_of(request: &Request) -> Option<&str> {
         | Request::EditUndo { path }
         | Request::EditRedo { path }
         | Request::MediaImport { path, .. }
+        | Request::MediaReplaceMotion { path, .. }
         | Request::TemplateSave { path, .. }
         | Request::ExportRun { path, .. }
         | Request::PreviewFrame { path, .. } => Some(path),
@@ -126,17 +126,32 @@ pub(crate) fn route(live: &Arc<dyn Live>, request: Request) -> Result<Reply, Api
         Request::EditRedo { .. } => live.run(true, Box::new(|session| view(session.redo()))),
         // Probed here, off the window's thread; only the adding is the
         // window's.
-        Request::MediaImport { file, .. } => {
-            let item = match media::probe(&file) {
-                Ok(info) => info.to_new_media(),
-                Err(error) => return Err(ApiError::failed(error)),
-            };
+        Request::MediaImport { file, motion, .. } => {
+            let item = crate::probed(&file, motion)?;
             live.run(
                 true,
                 Box::new(move |session| {
                     view(
                         session
                             .apply(Command::AddMedia { item })
+                            .map_err(crate::refused)?,
+                    )
+                }),
+            )
+        }
+        Request::MediaReplaceMotion {
+            media_id,
+            file,
+            motion,
+            ..
+        } => {
+            let item = crate::probed(&file, motion)?;
+            live.run(
+                true,
+                Box::new(move |session| {
+                    view(
+                        session
+                            .apply(Command::ReplaceMotion { media_id, item })
                             .map_err(crate::refused)?,
                     )
                 }),

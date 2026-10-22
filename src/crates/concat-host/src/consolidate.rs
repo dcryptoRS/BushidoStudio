@@ -17,7 +17,27 @@ pub struct Consolidation {
     timeline_id: String,
     video: VideoSettings,
     clips: Vec<Clip>,
+    /// The sound linked to the pieces, on clips of its own (Royalty Studio
+    /// fork): rendered with them, and replaced with them.
+    sounds: Vec<Clip>,
     media: Vec<MediaItem>,
+}
+
+/// The sound clips linked to `clips` and not among them.
+fn sounds_of(project: &Project, clips: &[Clip]) -> Vec<Clip> {
+    let timeline = project.active();
+    let mut sounds: Vec<Clip> = Vec::new();
+    for clip in clips {
+        for partner in timeline.partners(&clip.id) {
+            if partner.kind == concat_project::model::ClipKind::Audio
+                && !clips.iter().any(|piece| piece.id == partner.id)
+                && !sounds.iter().any(|sound| sound.id == partner.id)
+            {
+                sounds.push(partner.clone());
+            }
+        }
+    }
+    sounds
 }
 
 impl Consolidation {
@@ -25,8 +45,10 @@ impl Consolidation {
     pub fn new(project: &Project, ids: &[String]) -> Result<Self, String> {
         let clips =
             consolidation_clips(project.active(), ids).map_err(|error| error.to_string())?;
+        let sounds = sounds_of(project, &clips);
         let media = clips
             .iter()
+            .chain(&sounds)
             .map(|clip| {
                 project
                     .media_by_id(&clip.media_id)
@@ -38,6 +60,7 @@ impl Consolidation {
             timeline_id: project.active().id.clone(),
             video: project.active().video,
             clips,
+            sounds,
             media,
         })
     }
@@ -54,6 +77,7 @@ impl Consolidation {
         if project.active().id != self.timeline_id
             || project.active().video != self.video
             || consolidation_clips(project.active(), &ids).ok().as_ref() != Some(&self.clips)
+            || sounds_of(project, &self.clips) != self.sounds
             || self
                 .media
                 .iter()
@@ -78,6 +102,7 @@ impl Consolidation {
         timeline.clips = self
             .clips
             .iter()
+            .chain(&self.sounds)
             .cloned()
             .map(|mut clip| {
                 clip.start -= start;

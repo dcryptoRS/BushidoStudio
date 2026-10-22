@@ -88,6 +88,10 @@ export component ProjectDialog inherits Modal {
             DialogRow {
                 label: I18n.t("common.frame");
                 Select {
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.data.size;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.size;
                     options: ["1920 × 1080", "3840 × 2160", "1080 × 1920",
                         "1080 × 1080", "1440 × 1080", "2560 × 1080", I18n.t("common.custom")];
@@ -131,6 +135,10 @@ export component ProjectDialog inherits Modal {
             DialogRow {
                 label: I18n.t("common.frameRate");
                 Select {
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.data.rate;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.rate;
                     // The same ladder the launch sheet offers, in the same
                     // order: `RATES` in studio.rs.
@@ -173,6 +181,10 @@ export component ProjectDialog inherits Modal {
             DialogRow {
                 label: I18n.t("common.color");
                 Select {
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <int> wanted: root.data.color-space;
+                    changed wanted => { self.current = self.wanted; }
                     current: root.data.color-space;
                     options: ["SDR", "HDR (HLG)", "HDR (PQ)"];
                     details: ["Rec. 709", "Rec. 2020", "Rec. 2020"];

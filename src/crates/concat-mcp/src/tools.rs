@@ -63,6 +63,12 @@ pub enum Action {
     Mask,
     /// `preview.frame`, as an image.
     PreviewFrame,
+    /// A clip or a picture made by a generating service, imported
+    /// (Royalty Studio fork).
+    Generate,
+    /// `preview.frame`, measured as a colourist reads scopes (Royalty
+    /// Studio fork).
+    Levels,
 }
 
 /// How a reply is shown to the agent.
@@ -201,7 +207,7 @@ pub fn catalogue() -> Vec<Tool> {
         Tool {
             name: "timeline_read",
             title: "Read the timeline",
-            description: "An open project's active timeline as a compact summary: frame size and fps, the lanes (`tracks`, top to bottom, with their ids), every clip in time order with its id, kind, track, start, duration and end in seconds and whatever is not at its default (speed, volume, opacity, transform, effects, keyframed properties, text), and the media bin with each item's id. Read this to learn the ids other tools need.",
+            description: "An open project's active timeline as a compact summary: frame size and fps, the lanes (`tracks`, top to bottom, with their ids and - on a timeline with picture and sound lanes - their `kind`, \"video\" or \"audio\"), every clip in time order with its id, kind, track, start, duration and end in seconds and whatever is not at its default (speed, volume, opacity, transform, effects, keyframed properties, text), and the media bin with each item's id. Clips with the same `link` - a picture and its sound - are moved, trimmed, cut, retimed and deleted together; `edit_apply` with `{\"op\": \"unlinkClips\", \"clipIds\": [...]}` takes them apart and `linkClips` links clips. Read this to learn the ids other tools need.",
             read_only: true,
             destructive: false,
             idempotent: true,
@@ -233,11 +239,18 @@ pub fn catalogue() -> Vec<Tool> {
         method(
             "media_import",
             "Import media",
-            "Adds a file (an absolute path) to an open project's media bin, as dropping it on the window does. The new item's id is the summary's `createdId`; place it on the timeline with `clip_add`. Importing a path already in the bin changes nothing.",
+            "Adds a file (an absolute path) to an open project's media bin, as dropping it on the window does. The new item's id is the summary's `createdId`; place it on the timeline with `clip_add`. Importing a path already in the bin changes nothing. For a motion graphic rendered by concat-studio, pass the `motion` its `overlay_render` returned: the item keeps how it was made, so it can be rendered again with other props from the window's Motion tab or with `media_replace_motion`.",
             "media.import",
             Summary,
         )
         .idempotent(),
+        method(
+            "media_replace_motion",
+            "Replace a motion graphic's render",
+            "Puts a new render of a motion graphic (a file from concat-studio's `overlay_render`, with the `motion` it returned) in place of the bin item `mediaId`, as one undoable edit. The item keeps its id, so its clips stay where they are: a clip that showed the whole of the old render shows the whole of the new one, longer or shorter, as far as the next clip on its lane; a cut from it keeps its cut. Use it to change a placed title's text, colours or length without placing it again.",
+            "media.replaceMotion",
+            Summary,
+        ),
         method(
             "edit_apply",
             "Apply an edit",
@@ -262,7 +275,7 @@ pub fn catalogue() -> Vec<Tool> {
         command(
             "clip_add",
             "Place a clip",
-            "Places a clip of a media item (`mediaId`, from the bin) on a lane (`trackId`, from `timeline_read`) starting at `start` seconds. Its length is the media's (5 s for a still). `ripple: true` pushes later clips on that lane right instead of overlapping them. The new clip's id is `createdId`.",
+            "Places a clip of a media item (`mediaId`, from the bin) on a lane (`trackId`, from `timeline_read`) starting at `start` seconds. Its length is the media's (5 s for a still). On a timeline with picture and sound lanes a clip lands on a lane of its kind, and a video with sound lands as its picture on a video lane and its sound on an audio lane, linked. `ripple: true` pushes later clips on that lane right instead of overlapping them. The new clip's id is `createdId`.",
             "addClip",
         ),
         command(
@@ -384,7 +397,7 @@ pub fn catalogue() -> Vec<Tool> {
         command(
             "track_add",
             "Add a lane",
-            "Adds a lane to the active timeline: on top, or with `bottom: true` under every other. Its id is `createdId`.",
+            "Adds a lane to the active timeline: on top, or with `bottom: true` under every other - on a timeline with picture and sound lanes, a video lane on top and an audio lane at the bottom. Its id is `createdId`.",
             "addTrack",
         ),
         method(
@@ -450,6 +463,24 @@ pub fn catalogue() -> Vec<Tool> {
             destructive: false,
             idempotent: true,
             action: Action::PreviewFrame,
+        },
+        Tool {
+            name: "frame_levels",
+            title: "Measure a frame",
+            description: "Measures the composited frame at `time` seconds as a colourist reads the scopes, in IRE (0 black, 100 white, display-encoded): luma's low, median and high points and its mean, how much is crushed at black or clipped at white, the colour cast of the neutral areas in the shadows, midtones and highlights (red and blue against green; 0 is neutral), saturation, and how far skin tones sit from the skin-tone line (123° on the vectorscope). Use it before and after grading, with preview_frame to look; `notes` says in words what stands out.",
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+            action: Action::Levels,
+        },
+        Tool {
+            name: "media_generate",
+            title: "Generate a clip or a picture",
+            description: "Makes a clip (Higgsfield's Seedance 2.5, or Seedance through BytePlus) or a picture (Gemini, or Higgsfield's Soul) from `prompt` with the keys and models the person set in Settings › Assistant and AI, writes it into the project's `generated` folder and adds it to the media, marked as generated. Returns its `mediaId`; place it with clip_add. `fromTime` starts a clip from the timeline's frame at that time, so it continues the shot. Describe the shot as a cinematographer would - subject, action, shot size, angle, lens, light, color, movement - and match the footage around it. A request takes one to several minutes and is billed to the person's account with the service: generate only when asked or clearly wanted, and say what it will cost them in time.",
+            read_only: false,
+            destructive: false,
+            idempotent: false,
+            action: Action::Generate,
         },
     ]
 }
@@ -595,6 +626,39 @@ fn input_schema(schemas: &Schemas, tool: &Tool) -> Option<Value> {
             Some(schema)
         }
         Action::PreviewFrame => schemas.method("preview.frame"),
+        Action::Levels => {
+            let frame = schemas.method("preview.frame")?;
+            Some(json!({
+                "type": "object",
+                "properties": {
+                    "path": frame.pointer("/properties/path")?.clone(),
+                    "time": frame.pointer("/properties/time")?.clone(),
+                },
+                "required": ["path", "time"],
+            }))
+        }
+        Action::Generate => {
+            let path = schemas
+                .method("project.get")?
+                .pointer("/properties/path")?
+                .clone();
+            Some(json!({
+                "type": "object",
+                "properties": {
+                    "path": path,
+                    "kind": { "type": "string", "enum": ["clip", "picture"], "description": "A clip or a picture." },
+                    "prompt": { "type": "string", "minLength": 1, "description": "The shot or the picture, described." },
+                    "service": { "type": "string", "enum": ["higgsfield", "seedance", "gemini"], "description": "Who makes it: higgsfield (clips and pictures), seedance (clips, BytePlus) or gemini (pictures). Without it, the first with a key." },
+                    "fromTime": { "type": ["number", "null"], "minimum": 0, "description": "A clip only: start from the timeline's frame at this time, in seconds." },
+                    "duration": { "type": "integer", "minimum": 4, "maximum": 30, "default": 5, "description": "A clip's length in seconds." },
+                    "resolution": { "type": "string", "enum": ["480p", "720p", "1080p"], "default": "720p", "description": "A clip's resolution." },
+                    "aspect": { "type": "string", "enum": ASPECTS, "description": "The shape; the project's own when not given." },
+                    "audio": { "type": "boolean", "default": true, "description": "A clip with sound made for it." },
+                    "size": { "type": "string", "enum": ["1K", "2K", "4K"], "default": "2K", "description": "A Gemini picture's size." },
+                },
+                "required": ["path", "kind", "prompt"],
+            }))
+        }
         Action::Mask => {
             let update = schemas.command("updateClip")?;
             let mut mask = schemas.def("ClipMask")?;
@@ -708,7 +772,425 @@ fn run(tool: &Tool, arguments: Value, context: Context<'_>) -> Result<Outcome, A
             let result = backend.call(mask(arguments)?)?;
             Ok(Outcome::json(summary::view(&result)))
         }
+        Action::Generate => generate(arguments, backend, context.cancelled, context.progress),
+        Action::Levels => levels(arguments, backend),
     }
+}
+
+/// The longest side of the frame `frame_levels` measures: enough for the
+/// numbers, little to draw.
+const LEVELS_SIDE: f64 = 640.0;
+
+/// `frame_levels`: the frame drawn small, read back, and measured.
+fn levels(arguments: Value, backend: &mut dyn Backend) -> Result<Outcome, ApiError> {
+    use base64::Engine as _;
+    let path = arguments.get("path").cloned().unwrap_or(Value::Null);
+    let time = arguments.get("time").cloned().unwrap_or(Value::Null);
+    let view = backend.call(request("project.get", json!({ "path": path }))?)?;
+    let side = |key: &str, default: f64| {
+        view.pointer(&format!("/settings/{key}"))
+            .and_then(Value::as_f64)
+            .unwrap_or(default)
+    };
+    let (width, height) = (side("width", 1920.0), side("height", 1080.0));
+    let scale = (LEVELS_SIDE / width.max(height)).min(1.0);
+    let result = backend.call(request(
+        "preview.frame",
+        json!({
+            "path": path,
+            "time": time,
+            "width": ((width * scale).round() as u32).max(2),
+            "height": ((height * scale).round() as u32).max(2),
+        }),
+    )?)?;
+    let png = result
+        .get("png")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::failed("the frame came back without its picture"))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(png)
+        .map_err(|error| ApiError::failed(format!("the frame would not decode: {error}")))?;
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = decoder
+        .read_info()
+        .map_err(|error| ApiError::failed(format!("the frame would not decode: {error}")))?;
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    let info = reader
+        .next_frame(&mut pixels)
+        .map_err(|error| ApiError::failed(format!("the frame would not decode: {error}")))?;
+    let channels = info.color_type.samples();
+    let mut measured = measure(&pixels[..info.buffer_size()], channels);
+    measured["time"] = time;
+    Ok(Outcome::json(measured))
+}
+
+/// A frame of 8-bit pixels, `channels` bytes each (RGB first), measured
+/// as the scopes would read it: see the `frame_levels` tool.
+pub(crate) fn measure(pixels: &[u8], channels: usize) -> Value {
+    let ire = |value: f64| (value * 1000.0).round() / 10.0;
+    let mut luma = [0u64; 256];
+    let (mut crushed, mut clipped, mut total) = (0u64, 0u64, 0u64);
+    let mut luma_sum = 0.0;
+    let mut sat_sum = 0.0;
+    let mut sats = [0u64; 101];
+    // Neutral areas by band: shadows, midtones, highlights, as summed
+    // red, green, blue and a count.
+    let mut neutral = [[0.0f64; 4]; 3];
+    let (mut skin_cb, mut skin_cr, mut skin) = (0.0f64, 0.0f64, 0u64);
+    // Pure black over a tenth of the frame is bars around the picture - a
+    // vertical clip in a wide frame - or an empty frame, not shadows the
+    // grade crushed: said on its own and left out of the rest.
+    let stride = channels.max(3);
+    let all = pixels.len() / stride;
+    let pure_black = pixels
+        .chunks_exact(stride)
+        .filter(|pixel| pixel[..3] == [0, 0, 0])
+        .count();
+    let bars = all > 0 && pure_black * 10 >= all;
+    for pixel in pixels.chunks_exact(stride) {
+        if bars && pixel[..3] == [0, 0, 0] {
+            continue;
+        }
+        let [r, g, b] = [pixel[0], pixel[1], pixel[2]].map(|c| f64::from(c) / 255.0);
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let (high, low) = (r.max(g).max(b), r.min(g).min(b));
+        let sat = if high > 1e-4 {
+            (high - low) / high
+        } else {
+            0.0
+        };
+        total += 1;
+        luma[((y * 255.0).round() as usize).min(255)] += 1;
+        luma_sum += y;
+        sat_sum += sat;
+        sats[((sat * 100.0).round() as usize).min(100)] += 1;
+        if y <= 2.0 / 255.0 {
+            crushed += 1;
+        }
+        if high >= 254.0 / 255.0 {
+            clipped += 1;
+        }
+        if sat < 0.12 && y > 0.06 && y < 0.94 {
+            let band = if y < 1.0 / 3.0 {
+                0
+            } else if y < 2.0 / 3.0 {
+                1
+            } else {
+                2
+            };
+            for (slot, value) in neutral[band].iter_mut().zip([r, g, b, 1.0]) {
+                *slot += value;
+            }
+        }
+        let hue = hue_of(r, g, b);
+        if (5.0..=45.0).contains(&hue) && (0.12..=0.65).contains(&sat) && y > 0.2 && y < 0.9 {
+            skin_cb += (b - y) / 1.8556;
+            skin_cr += (r - y) / 1.5748;
+            skin += 1;
+        }
+    }
+    if total == 0 {
+        return json!({
+            "pureBlackPercent": 100.0,
+            "notes": ["the frame is pure black: nothing on the timeline here, or a fade at its darkest"],
+        });
+    }
+    let share = |count: u64| (count as f64 / total as f64 * 1000.0).round() / 10.0;
+    let percentile = |counts: &[u64], fraction: f64, scale: f64| {
+        let wanted = (total as f64 * fraction).ceil() as u64;
+        let mut seen = 0;
+        for (index, count) in counts.iter().enumerate() {
+            seen += count;
+            if seen >= wanted.max(1) {
+                return index as f64 / scale;
+            }
+        }
+        (counts.len() - 1) as f64 / scale
+    };
+    let mut notes: Vec<String> = Vec::new();
+    let bars_share = (pure_black as f64 / all.max(1) as f64 * 1000.0).round() / 10.0;
+    if bars {
+        notes.push(format!(
+            "{bars_share}% of the frame is pure black - bars around the picture, or an empty frame - and is left out of the other numbers"
+        ));
+    }
+    let (clip_share, crush_share) = (share(clipped), share(crushed));
+    if clip_share >= 1.0 {
+        notes.push(format!("{clip_share}% of the pixels are clipped at white"));
+    }
+    if crush_share >= 1.0 {
+        notes.push(format!("{crush_share}% of the pixels are crushed at black"));
+    }
+    let low = ire(percentile(&luma, 0.005, 255.0));
+    let high = ire(percentile(&luma, 0.995, 255.0));
+    if high < 85.0 {
+        notes.push(format!(
+            "the brightest point is only {high} IRE: room to lift the highlights"
+        ));
+    }
+    if low > 10.0 {
+        notes.push(format!(
+            "the darkest point is {low} IRE: the blacks are lifted"
+        ));
+    }
+    let names = ["shadows", "midtones", "highlights"];
+    let mut cast = Map::new();
+    for (band, sums) in neutral.iter().enumerate() {
+        if sums[3] < (total as f64 * 0.002).max(20.0) {
+            continue;
+        }
+        let [r, g, b] = [sums[0] / sums[3], sums[1] / sums[3], sums[2] / sums[3]];
+        let (red, blue) = (ire(r - g), ire(b - g));
+        cast.insert(names[band].to_owned(), json!({ "red": red, "blue": blue }));
+        let lean =
+            |amount: f64, warm: &str, cold: &str| if amount > 0.0 { warm } else { cold }.to_owned();
+        if red.abs() >= 2.0 || blue.abs() >= 2.0 {
+            let (axis, amount) = if red.abs() >= blue.abs() {
+                (lean(red, "red", "cyan"), red.abs())
+            } else {
+                (lean(blue, "blue", "yellow"), blue.abs())
+            };
+            notes.push(format!(
+                "the neutrals in the {} lean {axis} by {amount} IRE",
+                names[band]
+            ));
+        }
+    }
+    let skin_line = if skin as f64 >= total as f64 * 0.01 {
+        let angle = (skin_cr / skin as f64)
+            .atan2(skin_cb / skin as f64)
+            .to_degrees();
+        let off = ((angle - 123.0) * 10.0).round() / 10.0;
+        if off.abs() >= 5.0 {
+            notes.push(format!(
+                "skin tones sit {}° {} of the skin-tone line",
+                off.abs(),
+                if off > 0.0 {
+                    "towards yellow-green"
+                } else {
+                    "towards red-magenta"
+                }
+            ));
+        }
+        json!({ "share": share(skin), "angle": (angle * 10.0).round() / 10.0, "offLine": off })
+    } else {
+        Value::Null
+    };
+    json!({
+        "luma": {
+            "low": low,
+            "median": ire(percentile(&luma, 0.5, 255.0)),
+            "high": high,
+            "mean": ire(luma_sum / total as f64),
+            "crushedPercent": crush_share,
+            "clippedPercent": clip_share,
+        },
+        "pureBlackPercent": if bars { bars_share } else { 0.0 },
+        "neutralCast": cast,
+        "saturation": {
+            "mean": (sat_sum / total as f64 * 100.0).round(),
+            "p95": (percentile(&sats, 0.95, 1.0)).round(),
+        },
+        "skin": skin_line,
+        "notes": notes,
+    })
+}
+
+/// A colour's hue in degrees, 0 for a grey.
+fn hue_of(r: f64, g: f64, b: f64) -> f64 {
+    let (high, low) = (r.max(g).max(b), r.min(g).min(b));
+    let d = high - low;
+    if d < 1e-4 {
+        return 0.0;
+    }
+    let h = if high == r {
+        (g - b) / d
+    } else if high == g {
+        2.0 + (b - r) / d
+    } else {
+        4.0 + (r - g) / d
+    };
+    (h / 6.0).rem_euclid(1.0) * 360.0
+}
+
+/// The shapes a generated clip or picture can be asked in.
+const ASPECTS: [&str; 6] = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+
+/// The one of [`ASPECTS`] nearest a `width` × `height` frame.
+fn nearest_aspect(width: f64, height: f64) -> &'static str {
+    let ratio = (width.max(1.0) / height.max(1.0)).ln();
+    ASPECTS
+        .iter()
+        .min_by(|a, b| {
+            let off = |aspect: &str| {
+                let (w, h) = aspect.split_once(':').unwrap_or(("16", "9"));
+                let wanted = w.parse::<f64>().unwrap_or(16.0) / h.parse::<f64>().unwrap_or(9.0);
+                (ratio - wanted.ln()).abs()
+            };
+            off(a).total_cmp(&off(b))
+        })
+        .copied()
+        .unwrap_or("16:9")
+}
+
+/// `media_generate`: the frame to start from when asked, the service's
+/// request and its wait, and the file added to the project's media.
+fn generate(
+    arguments: Value,
+    backend: &mut dyn Backend,
+    cancelled: &AtomicBool,
+    progress: Option<&dyn Fn(f64, f64, String)>,
+) -> Result<Outcome, ApiError> {
+    use concat_host::genai::{self, ImageRequest, Keys, Models, Provider, VideoRequest};
+
+    let invalid = |why: &str| ApiError::invalid(format!("invalid arguments: {why}"));
+    let text = |key: &str| {
+        arguments
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    let path = text("path").ok_or_else(|| invalid("missing field `path`"))?;
+    let picture = match text("kind").as_deref() {
+        Some("clip") => false,
+        Some("picture") => true,
+        _ => return Err(invalid("`kind` is \"clip\" or \"picture\"")),
+    };
+    let prompt = text("prompt")
+        .map(|prompt| prompt.trim().to_owned())
+        .filter(|prompt| !prompt.is_empty())
+        .ok_or_else(|| invalid("`prompt` says what to make"))?;
+    let dirs = concat_host::AppDirs::locate().map_err(ApiError::failed)?;
+    let keys = Keys::load(&dirs.config);
+    let models = Models::from_settings(&dirs.config);
+    let offered = if picture {
+        [Provider::Gemini, Provider::Higgsfield]
+    } else {
+        [Provider::Higgsfield, Provider::Seedance]
+    };
+    let provider = match text("service").as_deref() {
+        Some("higgsfield") => Provider::Higgsfield,
+        Some("seedance") => Provider::Seedance,
+        Some("gemini") => Provider::Gemini,
+        Some(other) => return Err(invalid(&format!("no service called `{other}`"))),
+        None => offered
+            .into_iter()
+            .find(|provider| keys.has(*provider))
+            .unwrap_or(offered[0]),
+    };
+    if !offered.contains(&provider) {
+        return Err(invalid(if picture {
+            "pictures are made by gemini or higgsfield"
+        } else {
+            "clips are made by higgsfield or seedance"
+        }));
+    }
+    if !keys.has(provider) {
+        return Err(ApiError::failed(
+            "no key for this service: the person adds one in Settings › Assistant and AI",
+        ));
+    }
+    let view = backend.call(request("project.get", json!({ "path": path }))?)?;
+    let (width, height) = (
+        view.pointer("/settings/width")
+            .and_then(Value::as_f64)
+            .unwrap_or(1920.0),
+        view.pointer("/settings/height")
+            .and_then(Value::as_f64)
+            .unwrap_or(1080.0),
+    );
+    let aspect = match text("aspect") {
+        Some(aspect) if ASPECTS.contains(&aspect.as_str()) => aspect,
+        Some(_) => {
+            return Err(invalid(
+                "`aspect` is one of 16:9, 9:16, 1:1, 4:3, 3:4, 21:9",
+            ));
+        }
+        None => nearest_aspect(width, height).to_owned(),
+    };
+    let folder = std::path::Path::new(&path).join("generated");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_millis())
+        .unwrap_or_default();
+    // The frame to start from, drawn by the API as preview_frame draws one,
+    // no larger than 1920 on its long side.
+    let frame = match arguments.get("fromTime").and_then(Value::as_f64) {
+        Some(time) if !picture => {
+            let scale = (1920.0 / width.max(height)).min(1.0);
+            let even = |side: f64| (((side * scale) as u32) / 2 * 2).max(2);
+            let output = folder.join(format!("frame-{stamp}.png"));
+            backend.call(request(
+                "preview.frame",
+                json!({
+                    "path": path,
+                    "time": time,
+                    "output": output.to_string_lossy(),
+                    "width": even(width),
+                    "height": even(height),
+                }),
+            )?)?;
+            Some(output)
+        }
+        _ => None,
+    };
+    if let Some(report) = progress {
+        report(
+            0.0,
+            1.0,
+            format!("asked {provider:?}; a request takes one to several minutes"),
+        );
+    }
+    let made = if picture {
+        let request = ImageRequest {
+            prompt,
+            aspect,
+            size: text("size").unwrap_or_else(|| "2K".to_owned()),
+        };
+        genai::generate_image(provider, &keys, &models, &request, &folder, cancelled)
+    } else {
+        let request = VideoRequest {
+            prompt,
+            frame,
+            duration: arguments
+                .get("duration")
+                .and_then(Value::as_u64)
+                .map_or(5, |seconds| seconds.clamp(4, 30) as u32),
+            resolution: text("resolution").unwrap_or_else(|| "720p".to_owned()),
+            aspect,
+            audio: arguments
+                .get("audio")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        };
+        genai::generate_video(provider, &keys, &models, &request, &folder, cancelled)
+    }
+    .map_err(ApiError::failed)?;
+    let file = made.to_string_lossy().into_owned();
+    let mut item = concat_host::media::probe(&file)
+        .map_err(ApiError::failed)?
+        .to_new_media();
+    item.origin = Some(concat_project::model::MediaOrigin::Generated);
+    let result = backend.call(Request::EditApply {
+        path,
+        command: Box::new(concat_project::Command::AddMedia { item }),
+    })?;
+    let media_id = result
+        .pointer("/project/media")
+        .and_then(Value::as_array)
+        .and_then(|media| {
+            media
+                .iter()
+                .find(|item| item["path"].as_str() == Some(file.as_str()))
+        })
+        .and_then(|item| item["id"].as_str())
+        .map(str::to_owned);
+    Ok(Outcome::json(json!({
+        "file": file,
+        "mediaId": media_id,
+        "service": format!("{provider:?}").to_lowercase(),
+        "next": "Place it with clip_add, then grade and cut it to match the footage around it.",
+    })))
 }
 
 /// `clip_mask`: a clip patch with only its mask.
@@ -951,6 +1433,10 @@ mod tests {
                 json!({ "path": "/tmp/Cut", "file": "/tmp/a.mp4" }),
             ),
             (
+                "media_replace_motion",
+                json!({ "path": "/tmp/Cut", "mediaId": "m3", "file": "/tmp/Cut/overlays/badge-2.mov", "motion": { "template": "badge", "props": { "text": "Nuevo", "seconds": 3 } } }),
+            ),
+            (
                 "edit_apply",
                 json!({ "path": "/tmp/Cut", "command": { "op": "addTrack" } }),
             ),
@@ -1050,6 +1536,11 @@ mod tests {
                 "preview_frame",
                 json!({ "path": "/tmp/Cut", "time": 1.5, "width": 320, "height": 180 }),
             ),
+            ("frame_levels", json!({ "path": "/tmp/Cut", "time": 1.5 })),
+            (
+                "media_generate",
+                json!({ "path": "/tmp/Cut", "kind": "clip", "prompt": "A slow push-in on a barber's hands", "fromTime": 2.0, "duration": 6, "aspect": "9:16" }),
+            ),
         ]
     }
 
@@ -1105,6 +1596,10 @@ mod tests {
                 }
                 Action::PreviewFrame => request("preview.frame", sample.clone()),
                 Action::Mask => mask(sample.clone()),
+                // Composed: its first request is the project's settings.
+                Action::Generate | Action::Levels => {
+                    request("project.get", json!({ "path": sample["path"] }))
+                }
             };
             let built = built.unwrap_or_else(|error| panic!("{name}: {error}"));
             // Back again: the request as the API writes it fits the API's
@@ -1113,6 +1608,63 @@ mod tests {
             let root = concat_api::request_schema();
             check(&root, &written, &root, name).unwrap_or_else(|why| panic!("{why}"));
         }
+    }
+
+    /// A frame of one colour, `pixels` of them, as RGBA bytes.
+    fn flat(rgb: [u8; 3], pixels: usize) -> Vec<u8> {
+        (0..pixels)
+            .flat_map(|_| [rgb[0], rgb[1], rgb[2], 255])
+            .collect()
+    }
+
+    #[test]
+    fn a_grey_frame_measures_neutral_and_a_blue_one_leans_blue() {
+        let grey = measure(&flat([128, 128, 128], 1000), 4);
+        assert_eq!(grey["luma"]["median"], 50.2);
+        assert_eq!(grey["neutralCast"]["midtones"]["red"], 0.0);
+        assert_eq!(grey["luma"]["clippedPercent"], 0.0);
+        assert!(grey["notes"].as_array().is_some_and(|notes| {
+            notes
+                .iter()
+                .all(|note| !note.as_str().unwrap_or_default().contains("lean"))
+        }));
+        let cold = measure(&flat([124, 128, 136], 1000), 4);
+        let blue = cold["neutralCast"]["midtones"]["blue"]
+            .as_f64()
+            .expect("a midtone cast");
+        assert!(blue > 2.5, "{blue}");
+        assert!(
+            cold["notes"].to_string().contains("lean blue"),
+            "{}",
+            cold["notes"]
+        );
+    }
+
+    #[test]
+    fn bars_of_pure_black_are_said_apart_and_left_out() {
+        let mut frame = flat([0, 0, 0], 600);
+        frame.extend(flat([128, 128, 128], 400));
+        let measured = measure(&frame, 4);
+        assert_eq!(measured["pureBlackPercent"], 60.0);
+        assert_eq!(measured["luma"]["crushedPercent"], 0.0);
+        assert_eq!(measured["luma"]["median"], 50.2);
+        // A little pure black is part of the picture, and counts as crushed.
+        let mut frame = flat([0, 0, 0], 50);
+        frame.extend(flat([128, 128, 128], 950));
+        let measured = measure(&frame, 4);
+        assert_eq!(measured["pureBlackPercent"], 0.0);
+        assert_eq!(measured["luma"]["crushedPercent"], 5.0);
+    }
+
+    #[test]
+    fn white_is_clipped_and_a_face_lands_near_the_skin_line() {
+        let white = measure(&flat([255, 255, 255], 500), 4);
+        assert_eq!(white["luma"]["clippedPercent"], 100.0);
+        assert!(white["notes"].to_string().contains("clipped"));
+        // A face's tone: R 0.8, G 0.6, B 0.5 sits about 2° off the line.
+        let face = measure(&flat([204, 153, 128], 500), 4);
+        let off = face["skin"]["offLine"].as_f64().expect("skin found");
+        assert!(off.abs() < 5.0, "{off}");
     }
 
     #[test]

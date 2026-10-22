@@ -369,6 +369,20 @@ impl MixInput {
 ///
 /// Every clip's file must contain an audio stream; see [`mix_graph`].
 pub fn mix_to_file(clips: &[AudioClip], duration: f64, destination: &Path) -> Result<()> {
+    static NEVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    mix_to_file_until(clips, duration, destination, &NEVER)
+}
+
+/// [`mix_to_file`], stopping with [`Error::Cancelled`] once `cancel` is set:
+/// an export's Cancel is heard while the mix runs, which on an hour of
+/// sound is minutes, rather than only before and after it (audit
+/// 2026-10-15, M7).
+pub fn mix_to_file_until(
+    clips: &[AudioClip],
+    duration: f64,
+    destination: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<()> {
     ffi::init();
     // A bad chain is refused before any file is opened.
     for clip in clips {
@@ -579,6 +593,9 @@ pub fn mix_to_file(clips: &[AudioClip], duration: f64, destination: &Path) -> Re
             .map_err(|error| ffi::fail("filter", &inputs[index].path, error))?;
     }
     'mix: loop {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(Error::Cancelled);
+        }
         // Pull everything the sink has.
         loop {
             let mut mixed = Audio::empty();
@@ -695,6 +712,16 @@ pub fn mux(video: &Path, audio: &Path, output: &Path) -> Result<()> {
             path: audio.to_path_buf(),
         })?;
     let (video_index, video_tb) = (video_stream.index(), video_stream.time_base());
+    // One frame of the picture in its own ticks, for a packet that does not
+    // say how long it shows.
+    let frame_ticks = {
+        let rate = video_stream.avg_frame_rate();
+        let (num, den) = (
+            i64::from(video_tb.numerator()) * i64::from(rate.numerator()),
+            i64::from(video_tb.denominator()) * i64::from(rate.denominator()),
+        );
+        if num > 0 { den / num } else { 0 }
+    };
     let (audio_index, audio_tb) = (audio_stream.index(), audio_stream.time_base());
 
     let mut out =
@@ -734,8 +761,16 @@ pub fn mux(video: &Path, audio: &Path, output: &Path) -> Result<()> {
     // keeps the two abreast however their packet rates compare, and in
     // seconds rather than ticks, since the two files' time bases differ.
     let mut feeds = [
-        Feed::new(video_in, video_index, video_tb, out_video_tb, 0, video),
-        Feed::new(audio_in, audio_index, audio_tb, out_audio_tb, 1, audio),
+        Feed::new(
+            video_in,
+            video_index,
+            video_tb,
+            out_video_tb,
+            0,
+            video,
+            frame_ticks,
+        ),
+        Feed::new(audio_in, audio_index, audio_tb, out_audio_tb, 1, audio, 0),
     ];
     loop {
         for feed in &mut feeds {
@@ -781,8 +816,11 @@ struct Feed<'a> {
     path: &'a Path,
     next: Option<ffmpeg::Packet>,
     done: bool,
-    /// When the packet last written stops showing, in seconds.
+    /// When the latest-showing packet written stops showing, in seconds.
     end: Rational,
+    /// A packet's length, in `from` ticks, for one that does not say its
+    /// own: a frame of the video, or the last length the sound gave.
+    step: i64,
 }
 
 impl<'a> Feed<'a> {
@@ -793,6 +831,7 @@ impl<'a> Feed<'a> {
         to: ffmpeg::Rational,
         stream: usize,
         path: &'a Path,
+        step: i64,
     ) -> Self {
         Self {
             input,
@@ -804,6 +843,7 @@ impl<'a> Feed<'a> {
             next: None,
             done: false,
             end: Rational::ZERO,
+            step,
         }
     }
 
@@ -847,8 +887,22 @@ impl<'a> Feed<'a> {
         let Some(mut packet) = self.next.take() else {
             return Ok(());
         };
+        // The latest a packet shows to, not where the last one written
+        // does: with B-frames the last packets go out in decode order, ahead
+        // of the frame shown last, and a packet may not say its length. Both
+        // ended NVENC's H.264 early, and the sound was cut there - most of a
+        // frame of it at 24 fps.
+        if packet.duration() > 0 {
+            self.step = packet.duration();
+        }
+        let length = if packet.duration() > 0 {
+            packet.duration()
+        } else {
+            self.step
+        };
         if let Some(ticks) = packet.pts().or(packet.dts())
-            && let Some(end) = ffi::seconds(ticks + packet.duration(), self.from)
+            && let Some(end) = ffi::seconds(ticks + length, self.from)
+            && end > self.end
         {
             self.end = end;
         }

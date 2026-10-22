@@ -14,14 +14,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     AppliedFilter, AudioTrack, Background, Clip, ClipKind, ClipMask, ColorRange, ColorSpace, Crop,
-    CustomFont, Cutout, CutoutMode, Enhanced, Framing, KeyEase, KeyProperty, MediaItem, MediaKind,
-    MediaOrigin, Project, ShapeStyle, SpeedPoint, Stabilize, Stroke, TextStyle, Timeline, Track,
-    Transition, VideoSettings,
+    CustomFont, Cutout, CutoutMode, Enhanced, Framing, KeyEase, KeyProperty, Marker, MarkerColor,
+    MediaItem, MediaKind, MediaOrigin, Motion, Project, ShapeStyle, SpeedPoint, Stabilize, Stroke,
+    TextStyle, Timeline, Track, TrackKind, Transition, VideoSettings,
 };
 
 mod audio;
 mod clips;
+mod editing;
+mod links;
 pub use clips::{PlayheadSide, consolidation_clips, delete_to_playhead, why_not_merge};
+pub use links::type_lanes;
 mod media;
 mod properties;
 mod timelines;
@@ -64,6 +67,33 @@ pub enum TrackFlag {
     Visible,
     /// [`Track::muted`]: whether the track's audio is silenced.
     Muted,
+}
+
+/// How a command applies to the clips it names (Royalty Studio fork); see
+/// [`Command::Scoped`]. The default is what every command does unwrapped.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Scope {
+    /// Only the clips named: a move, a trim, a cut or a delete leaves the
+    /// clips linked to them ([`Clip::link`]) as they are - what a drag does
+    /// with linked selection off, or with Alt held.
+    pub alone: bool,
+    /// A video placed on lanes with kinds keeps its sound inside it, as
+    /// every clip did before lanes had kinds, rather than putting it on a
+    /// sound lane as a linked clip of its own.
+    pub sound_inside: bool,
+}
+
+impl Scope {
+    /// Either scope's asks, together: a scoped command inside a scoped
+    /// batch keeps both.
+    fn and(self, other: Scope) -> Scope {
+        Scope {
+            alone: self.alone || other.alone,
+            sound_inside: self.sound_inside || other.sound_inside,
+        }
+    }
 }
 
 /// Where one clip is going, in a multi-clip move.
@@ -241,6 +271,10 @@ pub struct NewMedia {
     /// nothing.
     #[serde(default)]
     pub origin: Option<MediaOrigin>,
+    /// How a motion graphic was made, when the editor rendered it; see
+    /// `MediaItem::motion`. Defaulted, for an import, to none.
+    #[serde(default)]
+    pub motion: Option<Motion>,
     /// What the probe found the picture recorded in; see
     /// `MediaItem::color_space`. Defaulted, for a caller from before it,
     /// to SDR.
@@ -292,12 +326,49 @@ pub enum Command {
         /// The user's file that takes the slot's place.
         item: NewMedia,
     },
+    /// Puts a new render of a motion graphic in place of the old one
+    /// (Royalty Studio fork). The item keeps its id, so its clips stay where
+    /// they are; its file, probe metadata and recipe become the render's
+    /// (`item.motion`, kept as it was when absent). A clip that showed the
+    /// whole of the old render shows the whole of the new one, longer or
+    /// shorter, as far as the next clip on its lane; a clip cut from it
+    /// keeps its cut, held inside the new length. Errs if the id is unknown.
+    ReplaceMotion {
+        /// The motion graphic being rendered again.
+        media_id: String,
+        /// The new render, as probed, with the recipe it was made from.
+        item: NewMedia,
+    },
     /// Several commands as one atomic edit: applied to a staged copy and
     /// committed only if every one succeeds, then recorded as a single undo
     /// step. The outcome carries the last id minted inside.
     Batch {
         /// The commands, applied in order. Nesting is legal.
         commands: Vec<Command>,
+    },
+    /// `command` - a batch included - applied as `scope` says (Royalty
+    /// Studio fork): to the clips it names alone rather than to them and
+    /// the clips linked to them, or placing a video with its sound inside.
+    Scoped {
+        /// How the command applies.
+        scope: Scope,
+        /// The command.
+        command: Box<Command>,
+    },
+    /// Links clips, so they are selected, moved, trimmed, cut, retimed and
+    /// deleted as one (Royalty Studio fork): every clip of each group they
+    /// were in joins the new link, minting an "l" id. Fewer than two clips
+    /// on the timeline is a no-op.
+    LinkClips {
+        /// The clips to link.
+        clip_ids: Vec<String>,
+    },
+    /// Takes clips out of their links (Royalty Studio fork): each group a
+    /// named clip is in comes apart, so the picture and the sound go their
+    /// own ways - Premiere's Unlink. A clip on its own is a no-op.
+    UnlinkClips {
+        /// The clips whose links come apart.
+        clip_ids: Vec<String>,
     },
     /// Places a clip of `media_id` on a named track, minting a "c" id.
     /// Duration comes from the media (five seconds for a still or unknown
@@ -315,6 +386,20 @@ pub enum Command {
         /// False for programmatic adds, true for a drop from the bin.
         #[serde(default)]
         ripple: bool,
+    },
+    /// Places the sound of a bin item alone - a sound file, or a video's
+    /// sound without its picture - as a sound clip, minting a "c" id (Royalty
+    /// Studio fork): what a paste of a sound copied off its picture lays,
+    /// and a drag of a video's sound alone. On the lane named when it holds
+    /// sound, else the first that does and is free for it, else a new one.
+    /// Errs if the media is gone or has no sound.
+    AddSoundClip {
+        /// The bin item whose sound is placed.
+        media_id: String,
+        /// The lane to place it on.
+        track_id: String,
+        /// Timeline position in seconds, floored at 0.
+        start: f64,
     },
     /// [`Command::AddClip`] without naming a lane: lands on the lowest
     /// track with nothing in the clip's span, falling back to the bottom
@@ -633,6 +718,119 @@ pub enum Command {
         /// The completed, probed render stored in the project media folder.
         item: NewMedia,
     },
+    /// Takes stretches of time out of the active timeline (Royalty Studio
+    /// fork): on every lane, what sits inside a stretch goes, a clip across
+    /// one of its ends is cut there, and everything after it moves up by
+    /// its length - so the picture, its sound and the words over it stay
+    /// together, which is what cutting the pauses out of a recording is.
+    /// Stretches in timeline seconds, `[start, end]`, in any order;
+    /// overlapping ones count once.
+    RemoveTime {
+        /// The stretches to take out.
+        ranges: Vec<[f64; 2]>,
+    },
+    /// Clears a stretch of the active timeline on every lane and leaves the
+    /// gap (Royalty Studio fork): a clip across either end is cut there and
+    /// what lies inside goes, nothing after it moves - the lift every
+    /// editor has beside the extract, which is [`Command::RemoveTime`].
+    LiftRange {
+        /// Where the stretch begins, in timeline seconds.
+        start: f64,
+        /// Where it ends.
+        end: f64,
+    },
+    /// Puts the stretch `source_in..source_out` of a file on the active
+    /// timeline at `start` (Royalty Studio fork): the three-point edit. An
+    /// insert opens room for it on every lane, moving what comes after it
+    /// later so everything stays in sync; an overwrite clears the stretch it
+    /// lands on, on its picture lane and the first sound lane, and covers
+    /// it. A video's sound comes along on a sound lane, linked, as a
+    /// placed video's does. Returns the new clip's id.
+    PlaceRange {
+        /// The file, from the bin.
+        media_id: String,
+        /// The lane the picture goes on; the first lane of its kind when
+        /// absent or of the other kind.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track_id: Option<String>,
+        /// Where it lands, in timeline seconds.
+        start: f64,
+        /// Where the stretch begins in the file, in seconds.
+        source_in: f64,
+        /// Where it ends in the file.
+        source_out: f64,
+        /// Covers what is there instead of making room.
+        #[serde(default)]
+        overwrite: bool,
+    },
+    /// A roll edit (Royalty Studio fork): the cut between two clips that
+    /// touch on one lane moves by `delta` seconds - the first clip's end and
+    /// the second's start together - so the cut lands on another frame and
+    /// nothing else on the timeline moves. Held to what each file has
+    /// past its edge. The clips linked to them roll with them where they
+    /// meet as well, unless scoped alone.
+    RollEdit {
+        /// The clip before the cut.
+        left_clip_id: String,
+        /// The clip after it.
+        right_clip_id: String,
+        /// Seconds the cut moves; positive is later.
+        delta: f64,
+    },
+    /// A slip (Royalty Studio fork): the clip shows another stretch of its
+    /// file - its in-point moves by `delta` seconds of the file - and stays
+    /// where it is, as long as it is. Held to what the file has. The clips
+    /// linked to it slip with it.
+    SlipClip {
+        /// The clip.
+        clip_id: String,
+        /// Seconds of the file; positive shows later material.
+        delta: f64,
+    },
+    /// A slide (Royalty Studio fork): the clip moves along its lane by
+    /// `delta` seconds showing the same frames, and the clips touching it
+    /// give way - the one before it grows or shrinks to meet it, the one
+    /// after it starts later or earlier - so the lane keeps its length.
+    /// The clips linked to it slide with it.
+    SlideClip {
+        /// The clip.
+        clip_id: String,
+        /// Seconds along the timeline; positive is later.
+        delta: f64,
+    },
+    /// Marks a moment on the active timeline (Royalty Studio fork), minting
+    /// a "k" id. Returns it.
+    AddMarker {
+        /// Seconds on the timeline.
+        time: f64,
+        /// What it marks.
+        #[serde(default)]
+        name: String,
+        /// Its colour.
+        #[serde(default)]
+        color: MarkerColor,
+    },
+    /// Changes a marker: whatever is given (Royalty Studio fork). An
+    /// unknown id is a no-op.
+    UpdateMarker {
+        /// The marker.
+        marker_id: String,
+        /// Where it moves to, in timeline seconds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        time: Option<f64>,
+        /// Its new name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// Its new colour.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<MarkerColor>,
+    },
+    /// Takes markers off the active timeline (Royalty Studio fork).
+    /// Unknown ids are ignored.
+    RemoveMarkers {
+        /// The markers.
+        marker_ids: Vec<String>,
+    },
     /// Deletes clips from the active timeline. Unknown ids are ignored.
     RemoveClips {
         /// The clips to delete.
@@ -858,6 +1056,9 @@ pub enum CommandError {
     /// A clip-placing command named media no longer in the bin.
     #[error("That media is no longer in the bin.")]
     MediaGone,
+    /// A sound was asked of a file that has none (Royalty Studio fork).
+    #[error("That file has no sound.")]
+    NoSound,
     /// A clip-placing command named a track no longer on the timeline.
     #[error("That track no longer exists.")]
     TrackGone,
@@ -881,6 +1082,14 @@ pub enum CommandError {
     /// one stored would poison every duration and key that touched it.
     #[error("A number in that edit is not finite.")]
     NotANumber,
+    /// [`Command::RollEdit`] named two clips that do not meet on one lane
+    /// (Royalty Studio fork).
+    #[error("A roll needs two clips that touch on one lane.")]
+    NotTouching,
+    /// [`Command::PlaceRange`] asked for a stretch with nothing in it
+    /// (Royalty Studio fork).
+    #[error("That stretch of the file is empty.")]
+    EmptyRange,
 }
 
 /// Mints ids. Owned by the editor so restored projects advance it past every
@@ -927,6 +1136,12 @@ impl IdMint {
             }
             for clip in &timeline.clips {
                 self.adopt(&clip.id);
+                if let Some(link) = &clip.link {
+                    self.adopt(link);
+                }
+            }
+            for marker in &timeline.markers {
+                self.adopt(&marker.id);
             }
         }
     }
@@ -968,10 +1183,13 @@ impl Command {
     /// the edit: which timeline tab is showing and the order of the tabs.
     /// Saved with the document, never recorded in undo history.
     pub fn is_view_state(&self) -> bool {
-        matches!(
-            self,
-            Command::SelectTimeline { .. } | Command::MoveTimeline { .. }
-        )
+        match self {
+            Command::Scoped { command, .. } => command.is_view_state(),
+            command => matches!(
+                command,
+                Command::SelectTimeline { .. } | Command::MoveTimeline { .. }
+            ),
+        }
     }
 
     /// True when any number in the command is NaN or infinite. JSON cannot
@@ -997,8 +1215,23 @@ impl Command {
         }
         match self {
             Command::Batch { commands } => commands.iter().any(Command::has_non_finite),
+            Command::Scoped { command, .. } => command.has_non_finite(),
+            Command::RemoveTime { ranges } => bad(ranges.iter().flatten().copied()),
+            Command::LiftRange { start, end } => bad([*start, *end]),
+            Command::PlaceRange {
+                start,
+                source_in,
+                source_out,
+                ..
+            } => bad([*start, *source_in, *source_out]),
+            Command::RollEdit { delta, .. }
+            | Command::SlipClip { delta, .. }
+            | Command::SlideClip { delta, .. } => bad([*delta]),
+            Command::AddMarker { time, .. } => bad([*time]),
+            Command::UpdateMarker { time, .. } => bad(*time),
             Command::AddMedia { item }
             | Command::FillSlot { item, .. }
+            | Command::ReplaceMotion { item, .. }
             | Command::ConsolidateClips { item, .. } => bad(item.duration) || bad(item.frame_rate),
             Command::AddClip { start, .. }
             | Command::AddClipAtFirstFree { start, .. }
@@ -1159,7 +1392,21 @@ pub fn apply(
     if command.has_non_finite() {
         return Err(CommandError::NotANumber);
     }
+    apply_in(project, mint, command, Scope::default())
+}
+
+/// [`apply`] as `scope` says; see [`Command::Scoped`].
+fn apply_in(
+    project: &mut Project,
+    mint: &mut IdMint,
+    command: Command,
+    scope: Scope,
+) -> Result<Outcome, CommandError> {
     match command {
+        Command::Scoped {
+            scope: inner,
+            command,
+        } => apply_in(project, mint, *command, scope.and(inner)),
         Command::Batch { commands } => {
             // All or nothing: apply to a staged copy and commit only a fully
             // successful run, so one bad command cannot leave a half-applied
@@ -1168,7 +1415,7 @@ pub fn apply(
             let mut created = None;
             let mut applied = false;
             for command in commands {
-                let outcome = apply(&mut staged, mint, command)?;
+                let outcome = apply_in(&mut staged, mint, command, scope)?;
                 if outcome.created_id.is_some() {
                     created = outcome.created_id;
                 }
@@ -1184,12 +1431,14 @@ pub fn apply(
         command @ (Command::AddMedia { .. }
         | Command::SetMediaPlaceholder { .. }
         | Command::FillSlot { .. }
+        | Command::ReplaceMotion { .. }
         | Command::RemoveMedia { .. }
         | Command::AddFont { .. }
         | Command::RemoveFont { .. }
         | Command::UpdateMediaPath { .. }
         | Command::SetMediaColorRange { .. }) => media::apply(project, mint, command),
         command @ (Command::AddClip { .. }
+        | Command::AddSoundClip { .. }
         | Command::AddClipAtFirstFree { .. }
         | Command::AddClipsInSequence { .. }
         | Command::AddTextClip { .. }
@@ -1203,7 +1452,8 @@ pub fn apply(
         | Command::SetClipEnhanced { .. }
         | Command::MergeClips { .. }
         | Command::ConsolidateClips { .. }
-        | Command::RemoveClips { .. }) => clips::apply(project, mint, command),
+        | Command::RemoveTime { .. }
+        | Command::RemoveClips { .. }) => clips::apply(project, mint, command, scope),
         command @ (Command::UpdateClip { .. }
         | Command::SetClipSpeed { .. }
         | Command::SetClipCutout { .. }
@@ -1217,9 +1467,20 @@ pub fn apply(
         | Command::ClearEffectKeys { .. }
         | Command::SetClipSpeedCurve { .. }
         | Command::SetClipTransform { .. }
-        | Command::FrameClip { .. }) => properties::apply(project, mint, command),
+        | Command::FrameClip { .. }) => properties::apply(project, mint, command, scope),
         command @ (Command::DetachAudio { .. } | Command::ReattachAudio { .. }) => {
             audio::apply(project, mint, command)
+        }
+        command @ (Command::LiftRange { .. }
+        | Command::PlaceRange { .. }
+        | Command::RollEdit { .. }
+        | Command::SlipClip { .. }
+        | Command::SlideClip { .. }
+        | Command::AddMarker { .. }
+        | Command::UpdateMarker { .. }
+        | Command::RemoveMarkers { .. }) => editing::apply(project, mint, command, scope),
+        command @ (Command::LinkClips { .. } | Command::UnlinkClips { .. }) => {
+            links::apply(project, mint, command)
         }
         command @ (Command::AddTrack { .. }
         | Command::RemoveTrack { .. }

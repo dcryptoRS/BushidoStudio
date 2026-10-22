@@ -56,7 +56,7 @@ Tools are named for what they do, and their argument schemas are generated from 
 | --- | --- |
 | Projects | `project_list`, `project_create`, `project_open`, `project_save`, `project_close`, `project_set_video` |
 | Reading | `timeline_read` (compact: lanes, clips in time order, media, ids), `project_get` (everything), `concat_version` |
-| Media | `media_probe`, `media_import` |
+| Media | `media_probe`, `media_import`, `media_replace_motion` |
 | Editing | `clip_add`, `clips_add_sequence`, `clip_trim`, `clips_split`, `clips_move`, `clips_remove`, `clip_update`, `clip_transform`, `clip_speed`, `clip_frame`, `track_add` |
 | Picture | `clip_mask`, `clip_stabilize`, `timeline_background` |
 | Titles and captions | `title_add`, `captions_add` |
@@ -64,9 +64,14 @@ Tools are named for what they do, and their argument schemas are generated from 
 | Anything else | `edit_apply` (any edit command, or a batch of them as one undo step), `edit_undo`, `edit_redo` |
 | Templates | `template_list`, `template_instantiate` |
 | Export | `export_start`, `export_status`, `export_wait` (with progress), `export_cancel` |
-| Looking | `preview_frame` (the composited frame as an image) |
+| Looking | `preview_frame` (the composited frame as an image), `frame_levels` (the frame measured as scopes read it: IRE levels, clipping, neutral cast, saturation, skin against the skin-tone line; Royalty Studio fork) |
+| Generating (Royalty Studio fork) | `media_generate` (a clip from Higgsfield or Seedance, or a picture from Gemini or Higgsfield, with the keys and models of Settings › Assistant and AI; added to the media as generated) |
 
 Edits stay in memory until `project_save`, as in the window. Times are seconds; a keyframe's position is a fraction of its clip (0 to 1); sizes and offsets are fractions of the frame.
+
+Video and audio tracks (Royalty Studio fork): a new project, and an older one when it is opened, has video lanes over audio lanes, each lane's `kind` in `timeline_read`. A clip lands only on a lane of its kind, and a video with sound placed with `clip_add` lands as two clips, the picture on a video lane and its sound on an audio lane, sharing a `link`. Linked clips are moved, trimmed, split, retimed and removed together; `edit_apply` with `{"op": "unlinkClips", "clipIds": [...]}` takes them apart, `{"op": "linkClips", ...}` links clips, and `{"op": "scoped", "scope": {"alone": true}, "command": ...}` edits only the clips a command names. An older project's document is kept beside it as `concat.before-av-tracks.json` on its first save after the conversion.
+
+The cutting room's edits (Royalty Studio fork), through `edit_apply`: `{"op": "addMarker", "time": 12.5, "name": "drop", "color": "yellow"}` (and `updateMarker`, `removeMarkers`; `timeline_read` lists them under `markers`), `{"op": "placeRange", "mediaId": "m3", "start": 10, "sourceIn": 4, "sourceOut": 7.5, "overwrite": false}` for a three-point insert or overwrite, `{"op": "liftRange", "start": 2, "end": 4}` (the gap stays; `removeTime` closes it), `{"op": "rollEdit", "leftClipId": "c4", "rightClipId": "c9", "delta": 0.5}`, `{"op": "slipClip", "clipId": "c4", "delta": -1}` (seconds of the file) and `{"op": "slideClip", "clipId": "c4", "delta": 0.25}`.
 
 ## Protocol
 

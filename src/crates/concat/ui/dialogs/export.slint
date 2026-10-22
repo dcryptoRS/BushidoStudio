@@ -298,6 +298,10 @@ component OutputSection inherits DialogSection {
     DialogRow {
         label: I18n.t("common.frameRate");
         Select {
+            // A pick sets the control's own value, cutting this binding: this
+            // follows the data and puts it back (audit 2026-10-12, #8).
+            property <int> wanted: root.data.rate;
+            changed wanted => { self.current = self.wanted; }
             current: root.data.rate;
             options: root.data.rates;
             details: root.data.rate-details;
@@ -310,6 +314,10 @@ component OutputSection inherits DialogSection {
     if root.data.hdr-timeline && root.data.deep-available: DialogRow {
         label: I18n.t("common.color");
         Select {
+            // A pick sets the control's own value, cutting this binding: this
+            // follows the data and puts it back (audit 2026-10-12, #8).
+            property <int> wanted: root.data.hdr ? 0 : 1;
+            changed wanted => { self.current = self.wanted; }
             current: root.data.hdr ? 0 : 1;
             options: [root.data.hdr-label, "SDR"];
             details: [I18n.t("export.asTheTimeline"), I18n.t("export.toneMapped")];
@@ -324,8 +332,16 @@ component OutputSection inherits DialogSection {
     if !root.data.hdr: DialogRow {
         label: I18n.t("export.codec");
         Select {
+            // A pick sets the control's own value, cutting this binding: this
+            // follows the data and puts it back (audit 2026-10-12, #8).
+            property <int> wanted: root.data.codec;
+            changed wanted => { self.current = self.wanted; }
             current: root.data.codec;
             options: ["H.264", "HEVC", "AV1"];
+            // A codec this device cannot encode cannot be picked: picked, the
+            // list showed it while the file was made in the one before
+            // (audit 2026-10-15, M2).
+            disabled: [!root.data.h264-encodable, !root.data.hevc-encodable, !root.data.av1-encodable];
             details: [
                 root.data.h264-encodable ? I18n.t("export.playsEverywhere") : I18n.t("export.notOnThisDevice"),
                 root.data.hevc-encodable ? I18n.t("export.halfTheSize") : I18n.t("export.notOnThisDevice"),
@@ -338,8 +354,13 @@ component OutputSection inherits DialogSection {
     if root.data.hdr: DialogRow {
         label: I18n.t("export.codec");
         Select {
+            // A pick sets the control's own value, cutting this binding: this
+            // follows the data and puts it back (audit 2026-10-12, #8).
+            property <int> wanted: root.data.codec - 1;
+            changed wanted => { self.current = self.wanted; }
             current: root.data.codec - 1;
             options: ["HEVC", "AV1"];
+            disabled: [!root.data.hevc-encodable, !root.data.av1-encodable];
             details: [
                 root.data.hevc-encodable ? I18n.t("export.halfTheSize") : I18n.t("export.notOnThisDevice"),
                 root.data.av1-encodable ? I18n.t("export.smallest") : I18n.t("export.notOnThisDevice"),
@@ -378,6 +399,10 @@ component OutputSection inherits DialogSection {
             VerticalLayout {
                 alignment: center;
                 Switch {
+                    // A pick sets the control's own value, cutting this binding: this
+                    // follows the data and puts it back (audit 2026-10-12, #8).
+                    property <bool> wanted: root.data.ten-bit;
+                    changed wanted => { self.checked = self.wanted; }
                     checked: root.data.ten-bit;
                     toggled(on) => { root.ten-bit-changed(on); }
                 }

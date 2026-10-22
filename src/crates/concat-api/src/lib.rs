@@ -51,7 +51,8 @@ use concat_host::stabilize::{StabilizeRequest, Stabilizers};
 use concat_host::templates::{self, SlotFill};
 use concat_host::{ProjectInfo, Session, Titles, lock, media, projects};
 use concat_project::Command;
-use concat_project::model::VideoSettings;
+use concat_project::commands::NewMedia;
+use concat_project::model::{MediaOrigin, Motion, VideoSettings};
 pub use live::{Live, LiveJob};
 
 pub use message::{
@@ -504,7 +505,13 @@ impl Api {
             Request::MediaProbe { path } => {
                 Ok(Reply::Media(media::probe(&path).map_err(ApiError::failed)?))
             }
-            Request::MediaImport { path, file } => view(self.import(&path, &file)?),
+            Request::MediaImport { path, file, motion } => view(self.import(&path, &file, motion)?),
+            Request::MediaReplaceMotion {
+                path,
+                media_id,
+                file,
+                motion,
+            } => view(self.replace_motion(&path, media_id, &file, motion)?),
             Request::CatalogueList { kind } => Ok(Reply::Packages(catalogue(kind.as_deref())?)),
             Request::TemplateList => Ok(Reply::Templates(templates::list(&self.dirs.config))),
             Request::TemplateInstantiate {
@@ -650,9 +657,26 @@ impl Api {
     }
 
     /// [`Request::MediaImport`]: the probe and the add, as one.
-    pub fn import(&mut self, path: &str, file: &str) -> Result<EditorView, ApiError> {
-        let item = media::probe(file).map_err(ApiError::failed)?.to_new_media();
+    pub fn import(
+        &mut self,
+        path: &str,
+        file: &str,
+        motion: Option<Motion>,
+    ) -> Result<EditorView, ApiError> {
+        let item = probed(file, motion)?;
         self.apply(path, Command::AddMedia { item })
+    }
+
+    /// [`Request::MediaReplaceMotion`]: the probe and the replacement, as one.
+    pub fn replace_motion(
+        &mut self,
+        path: &str,
+        media_id: String,
+        file: &str,
+        motion: Option<Motion>,
+    ) -> Result<EditorView, ApiError> {
+        let item = probed(file, motion)?;
+        self.apply(path, Command::ReplaceMotion { media_id, item })
     }
 
     /// [`Request::TemplateInstantiate`].
@@ -1182,6 +1206,17 @@ fn not_open(path: &str) -> ApiError {
     )
 }
 
+/// A file as the bin takes it: probed, and marked as a motion graphic
+/// with its recipe when it is one (Royalty Studio fork).
+pub(crate) fn probed(file: &str, motion: Option<Motion>) -> Result<NewMedia, ApiError> {
+    let mut item = media::probe(file).map_err(ApiError::failed)?.to_new_media();
+    if motion.is_some() {
+        item.origin = Some(MediaOrigin::Motion);
+        item.motion = motion;
+    }
+    Ok(item)
+}
+
 /// The edit layer's no, as the code that says so.
 fn refused(message: String) -> ApiError {
     ApiError::new(ErrorCode::Refused, message)
@@ -1281,6 +1316,7 @@ mod tests {
             has_audio: false,
             audio_tracks: Vec::new(),
             origin: None,
+            motion: None,
             color_space: Default::default(),
         }
     }

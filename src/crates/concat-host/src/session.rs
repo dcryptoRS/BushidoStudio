@@ -28,6 +28,29 @@ pub struct Session {
     upgraded: Vec<(String, String)>,
     /// The clips whose retired fields the open took off.
     retired: concat_project::RetiredFields,
+    /// The open gave a project made before lanes had kinds its picture and
+    /// sound lanes, and took its sound out onto them (Royalty Studio fork):
+    /// the first save keeps the document as it was beside it, first.
+    converted: bool,
+}
+
+/// What the document of a project converted to picture and sound lanes is
+/// kept as, beside it, before the first save writes over it.
+pub const BEFORE_LANES: &str = "concat.before-av-tracks.json";
+
+/// Keeps the document in `path` as it was before lanes had kinds, beside
+/// it as [`BEFORE_LANES`]: once, and never over a copy already there - the
+/// first is the one from before. A copy that cannot be made is logged and
+/// does not stop the save, whose document holds every edit either way.
+fn keep_before_lanes(path: &str) {
+    let folder = std::path::Path::new(path);
+    let (from, to) = (projects::manifest_path(folder), folder.join(BEFORE_LANES));
+    if !from.is_file() || to.exists() {
+        return;
+    }
+    if let Err(error) = std::fs::copy(&from, &to) {
+        log::warn!("project: could not keep {}: {error}", to.display());
+    }
 }
 
 /// What every mutating call returns: the authoritative state plus history
@@ -125,12 +148,21 @@ impl Session {
         // Fields an earlier version wrote and this one does not read, off
         // the clips, with the clips named for the window to say so.
         let retired = editor.drop_retired_fields();
+        // Picture lanes over sound lanes (Royalty Studio fork): a new
+        // project is born with them, an older one is given them here.
+        let had_clips = editor
+            .project()
+            .timelines
+            .iter()
+            .any(|timeline| !timeline.clips.is_empty());
+        let converted = editor.type_lanes() && had_clips;
         Ok(Session {
             path: path.to_owned(),
             settings,
             editor,
             upgraded,
             retired,
+            converted,
         })
     }
 
@@ -280,6 +312,9 @@ impl Session {
     /// as an edit. The disk write is the caller's, so it can happen off the
     /// thread that owns the session; [`Session::save`] does both.
     pub fn prepare_save(&mut self, name: Option<&str>) -> (String, serde_json::Value) {
+        if std::mem::take(&mut self.converted) {
+            keep_before_lanes(&self.path);
+        }
         if let Some(name) = name {
             let trimmed = name.trim();
             if !trimmed.is_empty() {
@@ -313,7 +348,26 @@ impl Session {
             editor,
             upgraded: Vec::new(),
             retired: concat_project::RetiredFields::default(),
+            converted: false,
         }
+    }
+
+    /// Takes `document` as the project's, with no history: the recovery
+    /// copy an open offered back and was told to restore (Royalty Studio
+    /// fork). The edits in it are unsaved until the next save.
+    pub fn adopt_document(&mut self, document: &serde_json::Value) -> Result<(), String> {
+        let mut editor = Editor::from_document(document)
+            .ok_or_else(|| "the recovery copy holds no project this build can read".to_owned())?;
+        editor.type_lanes();
+        self.editor = editor;
+        Ok(())
+    }
+
+    /// Whether the open converted the project to picture and sound lanes
+    /// and the copy of it as it was has not been kept yet: what the window
+    /// says as the project opens.
+    pub fn converted(&self) -> bool {
+        self.converted
     }
 
     /// The active timeline flattened for rendering. This is what export and
@@ -340,6 +394,75 @@ mod tests {
             rate_num: 30,
             rate_den: 1,
         }
+    }
+
+    /// A project saved before lanes had kinds opens with picture and sound
+    /// lanes, its sound on a lane of its own, and the first save keeps the
+    /// document as it was beside the new one - once (Royalty Studio fork).
+    #[test]
+    fn an_old_project_opens_converted_and_keeps_its_old_document_once() {
+        let scratch =
+            std::env::temp_dir().join(format!("concat-session-lanes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(&scratch).expect("scratch dir");
+        let folder = scratch.to_string_lossy().into_owned();
+        // The document an older build writes: lanes of no kind, the sound
+        // inside the video.
+        let mut old = Editor::new();
+        let media = old
+            .apply(Command::AddMedia {
+                item: concat_project::commands::NewMedia {
+                    path: "/clips/a.mp4".to_owned(),
+                    name: "a.mp4".to_owned(),
+                    duration: Some(8.0),
+                    kind: concat_project::model::MediaKind::Video,
+                    width: Some(1920),
+                    height: Some(1080),
+                    frame_rate: Some(30.0),
+                    frame_rate_fraction: Some("30/1".to_owned()),
+                    video_codec: Some("h264".to_owned()),
+                    audio_codec: Some("aac".to_owned()),
+                    has_audio: true,
+                    audio_tracks: Vec::new(),
+                    origin: None,
+                    motion: None,
+                    color_space: Default::default(),
+                },
+            })
+            .expect("adds media")
+            .created_id
+            .expect("an id");
+        old.apply(Command::AddClipAtFirstFree {
+            media_id: media,
+            start: 0.0,
+        })
+        .expect("places it");
+        let before = old.to_document(&settings());
+        projects::save(&folder, &before).expect("writes the old document");
+
+        let mut session = Session::open(&folder, settings()).expect("opens");
+        assert!(session.converted());
+        let timeline = session.project().active();
+        assert!(timeline.is_typed());
+        assert_eq!(
+            timeline.clips.len(),
+            2,
+            "the sound came out onto a lane of its own"
+        );
+        session.save(None).expect("saves");
+        let kept = std::fs::read_to_string(scratch.join(BEFORE_LANES)).expect("kept");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&kept).expect("json"),
+            before,
+            "the copy is the document from before"
+        );
+        // A second open, now with kinds, converts nothing and keeps nothing more.
+        let mut again = Session::open(&folder, settings()).expect("reopens");
+        assert!(!again.converted());
+        again.save(None).expect("saves again");
+        let still = std::fs::read_to_string(scratch.join(BEFORE_LANES)).expect("kept");
+        assert_eq!(still, kept);
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 
     #[test]

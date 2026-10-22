@@ -138,6 +138,7 @@ pub fn flatten_timeline_in(
                 media_height: media.height,
                 media_duration: media.duration,
                 has_audio: Some(media.has_audio),
+                link: clip.link.clone(),
                 backdrop: timeline
                     .background_on(clip, lane)
                     .and_then(|background| backdrop_of(project, background)),
@@ -276,6 +277,7 @@ mod tests {
                     has_audio: true,
                     audio_tracks: Vec::new(),
                     origin: None,
+                    motion: None,
                     color_space: Default::default(),
                 },
             })

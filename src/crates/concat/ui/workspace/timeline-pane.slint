@@ -10,7 +10,7 @@ import { ContextMenu, MenuItemData, MenuMetrics, MenuRow } from "../primitives/c
 import { HairlineSplitter } from "splitter.slint";
 import { ThinHScrollbar, ThinScrollbar } from "../primitives/scrollbar.slint";
 import {
-    ClipData, DropData, TimelineTabData, TimelineTool, TrackData, TrackSize,
+    ClipData, DropData, TimeSpan, TimelineTabData, TimelineTool, TrackData, TrackSize,
 } from "../timeline/model.slint";
 import { TimelineTabs } from "../timeline/tabs.slint";
 import { TimelineTray } from "../timeline/tray.slint";
@@ -62,6 +62,10 @@ export component TimelinePane inherits Rectangle {
     callback tool-changed(tool: TimelineTool);
     callback snap-changed(snap: bool);
     callback magnetic-changed(on: bool);
+    in property <bool> linked: true;
+    callback linked-changed(on: bool);
+    /// The pauses Cut Pauses found; see `Editor.cuts`.
+    in property <[TimeSpan]> cuts;
     callback pan-changed(on: bool);
     callback trim-follow-changed(on: bool);
     callback preview-axis-changed(on: bool);
@@ -99,13 +103,19 @@ export component TimelinePane inherits Rectangle {
     in property <float> seconds-per-pixel: 0.05;
     /// Where the cut ends, in seconds; see the bar under the lanes.
     in property <float> duration-seconds;
+    /// How far the stack is scrolled up from its bottom (Royalty Studio
+    /// fork). Lane one is the bottom one and a cut starts there, so zero
+    /// shows the lowest lanes, and they stay in view as lanes are added
+    /// above or the pane is made shorter, as in Premiere and Resolve. Kept
+    /// from the top, a project with a few empty lanes opened with its video
+    /// cut off under them.
     in-out property <length> track-scroll;
 
     callback scrubbed(seconds: float);
     callback key-mark-moved(from: float, to: float);
     /// A press on an empty stretch of lane; see Editor.blur.
     callback floor-pressed();
-    callback clip-pressed(id: string, additive: bool, edge: int);
+    callback clip-pressed(id: string, additive: bool, edge: int, alone: bool);
     callback clip-split(id: string, seconds: float);
     callback clip-volume(id: string, gain: float);
     callback clip-dragged(seconds: float, pixels: length);
@@ -126,6 +136,10 @@ export component TimelinePane inherits Rectangle {
     callback dropped(payload: string, seconds: float, y: length);
     callback track-flag-changed(index: int, visible: bool, muted: bool, locked: bool);
     callback track-sized(index: int, size: TrackSize);
+    callback track-resized(index: int, height: length);
+    /// How many rows from the top hold pictures, over sound rows; see
+    /// `Editor.video-rows` (Royalty Studio fork).
+    in property <int> video-rows: 0;
     callback track-removed(index: int);
 
     /// The corner button: show something else in this pane's seat.
@@ -184,7 +198,55 @@ export component TimelinePane inherits Rectangle {
         : 0px;
     property <length> overflow: Math.max(0px,
         root.stack-h - Math.max(0px, lanes.height - root.ruler-height));
-    property <length> at: Math.max(0px, Math.min(root.overflow, root.track-scroll));
+    /// The stack's scroll from the top, which is what the lanes and the
+    /// headers draw with.
+    property <length> at: root.overflow - Math.max(0px, Math.min(root.overflow, root.track-scroll));
+
+    // ── the line between pictures and sound (Royalty Studio fork) ──
+    // With picture lanes over sound lanes the stack is two sides of a line
+    // a person can drag, as in Premiere and Resolve: the picture lanes hang
+    // above it, V1 against it, and the sound lanes below it, A1 against it,
+    // each side scrolled on its own. Until it is dragged the line sits
+    // where everything shows when everything fits, and where the sound
+    // shows whole - or the middle, when the sound alone overfills half -
+    // when it does not.
+    property <bool> split-on: root.video-rows > 0 && root.video-rows < root.tracks.length;
+    property <length> rows-h: Math.max(0px, lanes.height - root.ruler-height);
+    property <length> video-h: root.split-on ? root.tracks[root.video-rows].top : root.stack-h;
+    property <length> audio-h: Math.max(0px, root.stack-h - root.video-h);
+    /// Where the line was dragged to, down from the ruler; negative until
+    /// it is.
+    in-out property <length> split-wanted: -1px;
+    property <length> split-auto: Math.min(root.video-h,
+        Math.max(root.rows-h - root.audio-h, root.rows-h / 2));
+    property <length> split-y: Math.max(Math.min(24px, root.rows-h / 2),
+        Math.min(root.rows-h - Math.min(24px, root.rows-h / 2),
+            root.split-wanted >= 0px ? root.split-wanted : root.split-auto));
+    /// How far each side is scrolled: the pictures up from V1, the sound
+    /// down from A1.
+    in-out property <length> video-scroll: 0px;
+    in-out property <length> audio-scroll: 0px;
+    property <length> video-at: Math.max(0px, Math.min(root.video-h - root.split-y, root.video-scroll));
+    property <length> audio-at: Math.max(0px,
+        Math.min(root.audio-h - (root.rows-h - root.split-y), root.audio-scroll));
+    property <length> video-offset: root.split-y - root.video-h + root.video-at;
+    property <length> audio-offset: root.split-y - root.video-h - root.audio-at;
+    property <length> split-from;
+
+    /// A wheel or a drag of `pixels` over the stack, the pointer `y` down
+    /// the rows: the side of the line it is over scrolls, or the one stack.
+    function scroll-stack(pixels: length, y: length) {
+        if (!root.split-on) {
+            root.track-scroll = root.overflow - Math.max(0px,
+                Math.min(root.overflow, root.at + pixels));
+        } else if (y < root.split-y) {
+            root.video-scroll = Math.max(0px, Math.min(root.video-h - root.split-y,
+                root.video-at - pixels));
+        } else {
+            root.audio-scroll = Math.max(0px,
+                Math.min(root.audio-h - (root.rows-h - root.split-y), root.audio-at + pixels));
+        }
+    }
 
     // The preview axis button's menu. Hosted here and not in the tray,
     // because the surface a ContextMenu opens into is the element it is:
@@ -318,6 +380,7 @@ export component TimelinePane inherits Rectangle {
             tool: root.tool;
             snap: root.snap;
             magnetic: root.magnetic;
+            linked: root.linked;
             pan-mode: root.pan-mode;
             trim-follow: root.trim-follow;
             preview-axis: root.preview-axis;
@@ -338,6 +401,7 @@ export component TimelinePane inherits Rectangle {
             tool-changed(tool) => { root.tool-changed(tool); }
             snap-changed(snap) => { root.snap-changed(snap); }
             magnetic-changed(on) => { root.magnetic-changed(on); }
+            linked-changed(on) => { root.linked-changed(on); }
             pan-changed(on) => { root.pan-changed(on); }
             trim-follow-changed(on) => { root.trim-follow-changed(on); }
             preview-axis-changed(on) => { root.preview-axis-changed(on); }
@@ -391,8 +455,14 @@ export component TimelinePane inherits Rectangle {
                 ruler-height: root.ruler-height;
                 track-scroll: root.at;
                 overflow: root.overflow;
+                video-rows: root.split-on ? root.video-rows : 0;
+                split: root.split-y;
+                video-offset: root.video-offset;
+                audio-offset: root.audio-offset;
 
-                scrolled(to) => { root.track-scroll = to; }
+                scrolled(to) => { root.track-scroll = root.overflow - to; }
+                track-scrolled(pixels, y) => { root.scroll-stack(pixels, y); }
+                resized(index, height) => { root.track-resized(index, height); }
                 flag-changed(index, visible, muted, locked) => {
                     root.track-flag-changed(index, visible, muted, locked);
                 }
@@ -429,6 +499,11 @@ export component TimelinePane inherits Rectangle {
                 scroll-left: root.scroll-left;
                 seconds-per-pixel: root.seconds-per-pixel;
                 track-scroll: root.at;
+                video-rows: root.split-on ? root.video-rows : 0;
+                split: root.split-y;
+                video-offset: root.video-offset;
+                audio-offset: root.audio-offset;
+                cuts: root.cuts;
                 ruler-height: root.ruler-height;
                 pan-mode: root.pan-mode;
                 preview-axis: root.preview-axis;
@@ -438,7 +513,7 @@ export component TimelinePane inherits Rectangle {
                 hovered(seconds) => { root.hovered(seconds); }
                 hover-ended => { root.hover-ended(); }
                 floor-pressed => { root.floor-pressed(); }
-                clip-pressed(id, additive, edge) => { root.clip-pressed(id, additive, edge); }
+                clip-pressed(id, additive, edge, alone) => { root.clip-pressed(id, additive, edge, alone); }
                 clip-split(id, seconds) => { root.clip-split(id, seconds); }
                 clip-volume(id, gain) => { root.clip-volume(id, gain); }
                 clip-dragged(seconds, pixels) => { root.clip-dragged(seconds, pixels); }
@@ -463,15 +538,39 @@ export component TimelinePane inherits Rectangle {
                 // The stack scrolls here rather than in Rust: it is a property
                 // of looking at the timeline, not of the edit, and nothing on
                 // the Rust side needs to know where the view is parked.
-                track-scrolled(pixels) => {
-                    root.track-scroll = Math.max(0px,
-                        Math.min(root.overflow, root.at + pixels));
-                }
+                track-scrolled(pixels, y) => { root.scroll-stack(pixels, y); }
                 zoomed(factor, anchor) => { root.zoom(factor, anchor); }
                 // How wide the lanes are decides which clips Rust sends;
                 // reported as it changes, and once at first layout.
                 changed width => { root.lanes-resized(self.width / 1px); }
                 init => { root.lanes-resized(self.width / 1px); }
+            }
+
+            // The line between pictures and sound, taken hold of across the
+            // headers and the lanes to give one side more room (Royalty
+            // Studio fork). Over the clips by a few pixels, as a splitter is.
+            if root.split-on: TouchArea {
+                x: 0;
+                y: root.ruler-height + root.split-y - 4px;
+                width: lanes.x + lanes.width;
+                height: 8px;
+                mouse-cursor: row-resize;
+                // The pointer in window terms: the handle moves with the line.
+                property <length> from-y;
+                pointer-event(event) => {
+                    if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                        root.split-from = root.split-y;
+                        self.from-y = self.absolute-position.y + self.mouse-y;
+                    }
+                }
+                moved => {
+                    if (self.pressed) {
+                        root.split-wanted = Math.max(0px, root.split-from
+                            + (self.absolute-position.y + self.mouse-y - self.from-y));
+                    }
+                }
+                // A double-click puts it back where the pane would have it.
+                double-clicked => { root.split-wanted = -1px; }
             }
 
             // Across the bottom of the lanes: where the view is along the

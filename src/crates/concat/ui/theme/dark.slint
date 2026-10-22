@@ -126,8 +126,8 @@ export global Dark {
     // The two places that carry the look are the selection highlight and
     // every activated tool, and both are the accent.
     //
-    // Six to choose from, and Settings › Appearance picks one. The first,
-    // lime, is the default. Each is legible against near-black and
+    // Seven to choose from, and Settings › Appearance picks one. The first,
+    // blue, is the default (Royalty Studio fork; lime is Concat's). Each is legible against near-black and
     // near-white alike, which is what a selection has to be: it lands on
     // whatever happens to be underneath it. What sits *on* them therefore
     // has to be dark ink, and is fixed with it: `on` is a deep shade of the
@@ -136,6 +136,9 @@ export global Dark {
     // The same order as `light.slint` and as `accent-names` in theme.slint,
     // which is where each one's name lives.
     out property <[Accent]> accents: [
+        // A Mac's system blue, the fork's default: white ink on it, as on
+        // a Mac, where every other accent here takes dark ink.
+        { accent: #0a84ff, hover: #409cff, soft: #0a84ff33, on: #ffffff },   // blue
         { accent: #cbf53f, hover: #d9ff63, soft: #cbf53f33, on: #15220a },   // lime
         { accent: #5fb8ff, hover: #82c9ff, soft: #5fb8ff33, on: #061c33 },   // sky
         { accent: #b394ff, hover: #c6b0ff, soft: #b394ff33, on: #1d0f3d },   // violet

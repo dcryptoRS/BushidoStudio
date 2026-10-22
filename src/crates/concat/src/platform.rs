@@ -1062,6 +1062,34 @@ pub fn reveal(path: &str) -> Result<(), String> {
     }
 }
 
+/// Moves a project's folder to the system Trash (Royalty Studio fork), from
+/// which it can be put back. Refused for a folder that is not a project -
+/// one without its document - so a stale entry in the recents can never
+/// send something else there.
+pub fn trash_project(path: &str) -> Result<(), String> {
+    let folder = std::path::Path::new(path);
+    if !concat_host::projects::is_project(folder) {
+        return Err(format!("{path} is not a project folder"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let out = std::process::Command::new("gio")
+            .arg("trash")
+            .arg(folder)
+            .output()
+            .map_err(|error| format!("gio: {error}"))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("moving to the Trash is only wired up on Linux in this build".to_owned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

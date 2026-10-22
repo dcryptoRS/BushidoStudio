@@ -46,7 +46,8 @@ use concat_project::{Command, PlayheadSide};
 
 mod backdrop;
 mod consolidate;
-use consolidate::MergeJob;
+mod editing;
+use consolidate::{MergeChecked, MergeJob};
 mod masking;
 use masking::{MaskFrame, MaskGrip};
 use slint::{Model, ModelRc, SharedString, VecModel};
@@ -97,6 +98,11 @@ pub const MIN_DURATION: f32 = 1.0 / 60.0;
 const LANE_LARGE: f32 = 108.0;
 const LANE_MEDIUM: f32 = 80.0;
 const LANE_SMALL: f32 = 44.0;
+/// The least and the most a lane dragged by hand is drawn at (Royalty
+/// Studio fork): enough for its name strip, and a picture lane large enough
+/// to judge the frames by.
+const LANE_MIN: f32 = 28.0;
+const LANE_MAX: f32 = 320.0;
 
 /// How long a title runs when it is placed: long enough to read, short
 /// enough that trimming it is a nudge rather than a fight.
@@ -440,6 +446,25 @@ pub enum Gesture {
         duration: f32,
         source_start: f32,
     },
+    /// The roll tool on a cut (Royalty Studio fork): the clip before it and
+    /// the clip after, and how far the cut has been dragged.
+    Roll {
+        left: String,
+        right: String,
+        delta: f64,
+    },
+    /// The slip tool on a clip: its speed, to turn the drag into seconds of
+    /// its file, and how far it has been dragged.
+    Slip {
+        clip: String,
+        speed: f64,
+        delta: f64,
+    },
+    /// The slide tool on a clip, and how far it has been dragged.
+    Slide {
+        clip: String,
+        delta: f64,
+    },
     /// Dragging a transition's duration handle on the timeline.
     TransitionResize {
         clip: String,
@@ -659,6 +684,8 @@ pub struct Models {
     pub key_editor_rows: Rc<VecModel<KeyRowData>>,
     /// The ruler's diamonds; see `Studio::key_marks`.
     pub key_marks: Rc<VecModel<f32>>,
+    /// The ruler's markers (Royalty Studio fork).
+    pub markers: Rc<VecModel<MarkerData>>,
     pub library_views: Rc<VecModel<LibraryViewData>>,
     pub menu: Rc<VecModel<MenuItemData>>,
     pub bar: Rc<VecModel<MenuItemData>>,
@@ -737,6 +764,7 @@ impl Models {
             key_rows: Rc::new(VecModel::default()),
             key_editor_rows: Rc::new(VecModel::default()),
             key_marks: Rc::new(VecModel::default()),
+            markers: Rc::new(VecModel::default()),
             library_views: Rc::new(VecModel::default()),
             menu: Rc::new(VecModel::default()),
             bar: Rc::new(VecModel::default()),
@@ -807,7 +835,7 @@ pub struct Studio {
     /// something to read.
     empty: Project,
     /// Unsaved changes, and the timer that writes them.
-    dirty: bool,
+    pub(crate) dirty: bool,
     autosave: slint::Timer,
 
     // ── the bin ──
@@ -846,6 +874,16 @@ pub struct Studio {
     pub playhead: f32,
     pub playing: bool,
     transport: slint::Timer,
+    /// J and L past real time, or backwards: the playhead's rate while the
+    /// shuttle runs, 0 when it does not, and the beat that moves it (Royalty
+    /// Studio fork).
+    shuttle_rate: f32,
+    shuttle_timer: slint::Timer,
+    /// Each timeline's in and out points, by its id (Royalty Studio fork):
+    /// the window's, as the playhead is, not the document's.
+    pub marks: HashMap<String, (Option<f64>, Option<f64>)>,
+    /// The marker sheet, while one is up (Royalty Studio fork).
+    pub marker_sheet: Option<editing::MarkerSheet>,
     /// The phone's lanes carrying on after a finger throws them, and the
     /// beat that moves them while they do; see `panes::glide`.
     coast: crate::panes::glide::Coast,
@@ -995,6 +1033,8 @@ pub struct Studio {
     pub project_sheet: crate::panes::project::ProjectPane,
     pub captions: crate::panes::captions::CaptionsPane,
     pub speech: crate::panes::speech::SpeechPane,
+    /// The Generate with AI sheet (Royalty Studio fork).
+    pub generate: crate::panes::generate::GeneratePane,
     /// The library's Audio page: the user's own sounds.
     pub sounds: crate::panes::sounds::SoundsPane,
     /// A file from the library lent the monitor and the speakers; see
@@ -1069,6 +1109,16 @@ pub struct Studio {
     reverse_jobs: HashMap<String, f32>,
     /// A selection being rendered into one clip, with its own cancel flag.
     merge_job: Option<MergeJob>,
+    /// The clip pressed last was taken alone, Alt held (Royalty Studio
+    /// fork): it was selected, and is edited, without the clips linked to
+    /// it.
+    alone_selection: bool,
+    /// The document's half of the merge checks - whether the selection
+    /// rejoins exactly, and why it cannot be merged - for the revision and
+    /// selection they were made at: asked on every lanes publish, playback's
+    /// included, and each asking cloned every selected clip (audit
+    /// 2026-10-15, L2).
+    merge_checked: std::cell::RefCell<Option<MergeChecked>>,
     /// The smart stroke being read, by the same name, while one is.
     region_job: Option<String>,
     /// The last smart stroke as the stage drew it, kept on screen from the
@@ -1137,7 +1187,7 @@ fn new_title_style(prefs: &crate::prefs::Preferences) -> TextStyle {
         ..TextStyle::default()
     });
     TextStyle {
-        content: "New title".to_owned(),
+        content: t("studio.newTitleContent"),
         ..base
     }
 }
@@ -2058,6 +2108,21 @@ pub enum Confirm {
     /// this a disk unplugged, full or read-only made a window that would
     /// never close.
     QuitWithoutSaving { error: String },
+    /// Closing a project with changes not saved, autosave being off
+    /// (Royalty Studio fork): Save, Don't save or Cancel, and then `then`.
+    SaveChanges { then: AfterClose },
+    /// The project opened with a recovery copy newer than its document:
+    /// changes a window that died had not saved (Royalty Studio fork).
+    Recover { document: serde_json::Value },
+}
+
+/// Where a close goes once the project is shut (Royalty Studio fork).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AfterClose {
+    /// Out of the app.
+    Quit,
+    /// Back to the launch screen.
+    Start,
 }
 
 /// One clip on the clipboard: the clip as it was when copied, and the row
@@ -2158,6 +2223,29 @@ fn copy_commands(source: &Clip, placed: &Clip, track_id: &str, start: f64) -> Ve
         },
     });
     commands
+}
+
+/// Each lane's name, by its index in `tracks` (stored bottom first), as
+/// Premiere and Resolve name theirs: picture lanes V1, V2... up from the
+/// line between pictures and sound, sound lanes A1, A2... down from it.
+/// Empty for a lane of no kind.
+fn lane_names(tracks: &[model::Track]) -> Vec<String> {
+    let mut names = vec![String::new(); tracks.len()];
+    let mut picture = 0;
+    for (index, lane) in tracks.iter().enumerate() {
+        if lane.kind == model::TrackKind::Video {
+            picture += 1;
+            names[index] = format!("V{picture}");
+        }
+    }
+    let mut sound = 0;
+    for (index, lane) in tracks.iter().enumerate().rev() {
+        if lane.kind == model::TrackKind::Audio {
+            sound += 1;
+            names[index] = format!("A{sound}");
+        }
+    }
+    names
 }
 
 /// Where each held clip lands: `(row, start)` per clip in the order held,
@@ -2279,6 +2367,10 @@ impl Studio {
             // ~20px a second: a ten-second cut fits a pane at its default width.
             playing: false,
             transport: slint::Timer::default(),
+            shuttle_rate: 0.0,
+            shuttle_timer: slint::Timer::default(),
+            marks: HashMap::new(),
+            marker_sheet: None,
             coast: crate::panes::glide::Coast::default(),
             glide_beat: slint::Timer::default(),
             hover: None,
@@ -2334,6 +2426,7 @@ impl Studio {
             project_sheet: crate::panes::project::ProjectPane::default(),
             captions: crate::panes::captions::CaptionsPane::default(),
             speech: crate::panes::speech::SpeechPane::with_saved(&host.dirs),
+            generate: crate::panes::generate::GeneratePane::default(),
             sounds: crate::panes::sounds::SoundsPane::open(&host.dirs),
             source: None,
             meters: crate::meters::MeterFeed::default(),
@@ -2359,6 +2452,8 @@ impl Studio {
             enhance_ticked: HashSet::new(),
             reverse_jobs: HashMap::new(),
             merge_job: None,
+            merge_checked: std::cell::RefCell::new(None),
+            alone_selection: false,
             region_job: None,
             pending_stroke: None,
             tripped_strokes: HashSet::new(),
@@ -2455,8 +2550,78 @@ impl Studio {
                 self.release_project();
                 slint::quit_event_loop().ok();
             }
+            // Don't save: the changes go with the window, and so does the
+            // copy that kept them.
+            Some(Confirm::SaveChanges { then }) => {
+                log::info!("close: closing without saving, as asked");
+                if let Some(path) = self
+                    .session
+                    .as_ref()
+                    .map(|session| session.path().to_owned())
+                {
+                    projects::discard_recovery(&path, projects::ticket());
+                }
+                self.release_project();
+                if then == AfterClose::Quit {
+                    slint::quit_event_loop().ok();
+                }
+            }
+            // Discard: the project stays as it was last saved.
+            Some(Confirm::Recover { .. }) => {
+                if let Some(path) = self
+                    .session
+                    .as_ref()
+                    .map(|session| session.path().to_owned())
+                {
+                    projects::discard_recovery(&path, projects::ticket());
+                }
+            }
             None => {}
         }
+    }
+
+    /// The sheet's safe answer, where it has one (Royalty Studio fork):
+    /// Save and close, or Recover.
+    pub fn confirm_chosen(&mut self) {
+        match self.confirm.take() {
+            Some(Confirm::SaveChanges { then }) => match self.close_project() {
+                Ok(()) if then == AfterClose::Quit => {
+                    slint::quit_event_loop().ok();
+                }
+                Ok(()) => {}
+                Err(error) => self.offer_quit_without_saving(error),
+            },
+            Some(Confirm::Recover { document }) => {
+                let adopted = self
+                    .session
+                    .as_mut()
+                    .map(|session| session.adopt_document(&document));
+                match adopted {
+                    Some(Ok(())) => {
+                        self.selection.clear();
+                        self.after_change();
+                        self.notify(&t("recover.recovered"), false);
+                    }
+                    Some(Err(error)) => self.notify(&error, true),
+                    None => {}
+                }
+            }
+            other => self.confirm = other,
+        }
+    }
+
+    /// Whether closing must ask first: autosave is off and there are
+    /// changes not saved (Royalty Studio fork).
+    pub fn wants_save_question(&self) -> bool {
+        !self.prefs.autosaves() && self.dirty && self.session.is_some()
+    }
+
+    /// Asks Save, Don't save or Cancel before a close that goes on to
+    /// `then`.
+    pub fn ask_save_changes(&mut self, then: AfterClose) {
+        self.flush_commit();
+        self.pause();
+        self.confirm = Some(Confirm::SaveChanges { then });
     }
 
     /// The confirmation sheet, as Slint shows it.
@@ -2482,6 +2647,7 @@ impl Studio {
                     title: t("timeline.deleteTrackTitle").into(),
                     message: message.into(),
                     action: t("common.delete").into(),
+                    ..Default::default()
                 }
             }
             Confirm::ReplaceExport { path } => crate::ui::ConfirmData {
@@ -2489,12 +2655,28 @@ impl Studio {
                 title: t("export.replaceFileTitle").into(),
                 message: tf("export.replaceFileMessage", &[path]).into(),
                 action: t("export.replace").into(),
+                ..Default::default()
             },
             Confirm::QuitWithoutSaving { error } => crate::ui::ConfirmData {
                 open: true,
                 title: t("close.unsavedTitle").into(),
                 message: tf("close.unsavedMessage", &[error]).into(),
                 action: t("close.quitWithoutSaving").into(),
+                ..Default::default()
+            },
+            Confirm::SaveChanges { .. } => crate::ui::ConfirmData {
+                open: true,
+                title: t("close.saveChangesTitle").into(),
+                message: tf("close.saveChangesMessage", &[&self.project_name]).into(),
+                action: t("close.dontSave").into(),
+                primary: t("close.save").into(),
+            },
+            Confirm::Recover { .. } => crate::ui::ConfirmData {
+                open: true,
+                title: t("recover.title").into(),
+                message: t("recover.message").into(),
+                action: t("recover.discard").into(),
+                primary: t("recover.recover").into(),
             },
         }
     }
@@ -2533,8 +2715,17 @@ impl Studio {
 
     /// How tall one lane is drawn: a lane takes the height of the tallest
     /// thing on it, without the lanes having to be typed. An empty one takes
-    /// the middle size.
+    /// the small size (Royalty Studio fork): at the middle one, a new
+    /// project's spare lanes took more of a short timeline than its video.
     fn lane_height(&self, lane: &Track) -> f32 {
+        if let Some(height) = self
+            .lanes
+            .lane_view
+            .get(&lane.id)
+            .and_then(|view| view.height)
+        {
+            return height.clamp(LANE_MIN, LANE_MAX);
+        }
         match self.lane_size(&lane.id) {
             TrackSize::Small => LANE_SMALL,
             TrackSize::Medium => LANE_MEDIUM,
@@ -2556,7 +2747,7 @@ impl Studio {
                         }
                     })
                     .fold(0.0_f32, f32::max);
-                if tallest > 0.0 { tallest } else { LANE_MEDIUM }
+                if tallest > 0.0 { tallest } else { LANE_SMALL }
             }
         }
     }
@@ -2693,8 +2884,9 @@ impl Studio {
         // Anything but an inspector commit ends the coalescing window; the
         // commit path sets `last_commit` again right after calling here.
         self.last_commit = None;
-        let session = self.session.as_mut()?;
         let chosen = matches!(command, Command::SetTimelineVideo { .. });
+        let command = self.scoped(command);
+        let session = self.session.as_mut()?;
         let before = session.video().color_space;
         match session.apply(command) {
             Ok(view) => {
@@ -2749,6 +2941,7 @@ impl Studio {
         // dial turned is many of these.
         log::debug!("edit: {} ({gesture})", command_name(&command));
         self.echo = None;
+        let command = self.scoped(command);
         let session = self.session.as_mut()?;
         let before = session.video().color_space;
         match session.apply_within(Some(gesture), command) {
@@ -2763,6 +2956,91 @@ impl Studio {
                 None
             }
         }
+    }
+
+    /// Ctrl+L, as in Premiere (Royalty Studio fork): the selection's links
+    /// taken apart when any of it is linked; otherwise the selected clips
+    /// linked, so they are edited as one.
+    pub fn toggle_link(&mut self) {
+        let ids = self.selection.clone();
+        if ids.is_empty() {
+            return;
+        }
+        let timeline = self.timeline();
+        if ids.iter().any(|id| !timeline.partners(id).is_empty()) {
+            self.apply(Command::UnlinkClips { clip_ids: ids });
+            self.notify(&t("studio.unlinked"), false);
+        } else if ids.len() > 1 {
+            self.apply(Command::LinkClips { clip_ids: ids });
+            self.notify(&t("studio.linked"), false);
+        } else {
+            self.notify(&t("studio.linkNeedsTwo"), false);
+        }
+    }
+
+    /// Whether an edit takes only the clips it names, leaving the clips
+    /// linked to them as they are: linked selection is off, or the clip
+    /// was pressed with Alt (Royalty Studio fork).
+    pub fn edits_alone(&self) -> bool {
+        !self.prefs.links_selection() || self.alone_selection
+    }
+
+    /// `command` as the window's settings say it applies (Royalty Studio
+    /// fork): to the clips it names alone, see [`Studio::edits_alone`];
+    /// and placing a video with its sound inside while splitting the sound
+    /// off is turned off in Settings.
+    fn scoped(&self, command: Command) -> Command {
+        let scope = concat_project::Scope {
+            alone: self.edits_alone(),
+            sound_inside: !self.prefs.splits_audio(),
+        };
+        // A command that says its own scope keeps it: a copy being laid is
+        // shaped with its new sound whatever the selection mode.
+        if scope == concat_project::Scope::default()
+            || command.is_view_state()
+            || matches!(command, Command::Scoped { .. })
+        {
+            command
+        } else {
+            Command::Scoped {
+                scope,
+                command: Box::new(command),
+            }
+        }
+    }
+
+    /// The clips linked to the selection that are selected with it - drawn
+    /// selected and taken along by every edit - when edits take linked
+    /// clips along.
+    pub fn implied_selection(&self) -> HashSet<String> {
+        if self.edits_alone() {
+            return HashSet::new();
+        }
+        let timeline = self.timeline();
+        timeline
+            .with_partners(&self.selection)
+            .into_iter()
+            .filter(|id| !self.selection.contains(id))
+            .collect()
+    }
+
+    /// `ids` with one clip from each linked group, the first named: what a
+    /// list of per-clip edits keeps when every edit takes the clip's
+    /// partners along, so no clip is cut twice.
+    fn one_per_link(&self, ids: Vec<String>) -> Vec<String> {
+        if self.edits_alone() {
+            return ids;
+        }
+        let timeline = self.timeline();
+        let mut seen: HashSet<String> = HashSet::new();
+        ids.into_iter()
+            .filter(
+                |id| match timeline.clip(id).and_then(|clip| clip.link.clone()) {
+                    Some(link) => seen.insert(link),
+                    None => true,
+                },
+            )
+            .collect()
     }
 
     /// [`Studio::apply`], or [`Studio::apply_within`] when `gesture` names
@@ -2849,9 +3127,37 @@ impl Studio {
             std::time::Duration::from_millis(1500),
             || {
                 crate::host::Shell::with(|shell, app| {
-                    shell.studio.borrow_mut().save(false);
+                    shell.studio.borrow_mut().autosave_now();
                     shell.studio.borrow().publish(&app, &shell.models);
                 });
+            },
+        );
+    }
+
+    /// What the autosave timer does: the project saved, or with autosave
+    /// off, the recovery copy written beside it (Royalty Studio fork).
+    fn autosave_now(&mut self) {
+        if self.prefs.autosaves() {
+            self.save(false);
+        } else {
+            self.save_recovery();
+        }
+    }
+
+    /// Writes the edits not saved yet as the project's recovery copy, on a
+    /// worker, in order; the document itself is left as it was saved.
+    fn save_recovery(&mut self) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let (path, document) = (session.path().to_owned(), session.document());
+        let ticket = projects::ticket();
+        spawn_in_project(
+            move || projects::save_recovery(&path, &document, ticket),
+            |_, _, _, result| {
+                if let Err(error) = result {
+                    log::warn!("project: could not write the recovery copy: {error}");
+                }
             },
         );
     }
@@ -2869,7 +3175,14 @@ impl Studio {
         let ticket = projects::ticket();
         self.dirty = false;
         spawn_in_project(
-            move || projects::save_ordered(&path, &document, ticket),
+            move || {
+                let saved = projects::save_ordered(&path, &document, ticket);
+                // Saved: the recovery copy holds nothing the project does not.
+                if saved.is_ok() {
+                    projects::discard_recovery(&path, ticket);
+                }
+                saved
+            },
             move |studio, _, _, result| match result {
                 Ok(_) if announce => studio.notify(&t("studio.projectSaved"), false),
                 Ok(_) => {}
@@ -2891,7 +3204,15 @@ impl Studio {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let specs = audio_specs(&session.flattened_clips());
+        // Through the exporter's transitions, so a cross-fade is heard as
+        // the file will have it rather than as a hard cut.
+        let video = session.video();
+        let rate = concat_core::time::FrameRate::new(concat_core::time::Rational::new(
+            video.rate_num,
+            video.rate_den.max(1),
+        ));
+        let clips = concat_export::as_heard(session.flattened_clips(), rate);
+        let specs = audio_specs(&clips);
         self.host
             .playback
             .set_clips(std::path::PathBuf::from(session.path()), specs);
@@ -3043,6 +3364,11 @@ impl Studio {
 
     pub fn play_toggle(&mut self) {
         self.stop_glide();
+        // Space stops a shuttle, as K does (Royalty Studio fork).
+        if self.shuttle_rate != 0.0 {
+            self.stop_shuttle();
+            return;
+        }
         // A voiceover take owns the transport while it runs: Space, the
         // monitor's button and the keymap's play pause or resume the take
         // and the picture together, never the picture alone.
@@ -3142,6 +3468,7 @@ impl Studio {
         let was_playing = self.playing;
         self.playing = false;
         self.transport.stop();
+        self.stop_shuttle();
         self.host.playback.pause();
         // The textures playback streamed through are let go once it stops.
         if was_playing {
@@ -4104,7 +4431,7 @@ impl Studio {
             return;
         }
         if !video && clip.kind == model::ClipKind::Image {
-            self.notify("A still has no sound to filter", true);
+            self.notify(&t("studio.stillHasNoSound"), true);
             return;
         }
         let entry = AppliedFilter::new(id);
@@ -4680,13 +5007,14 @@ impl Studio {
 
     /// A press resolves the selection before anything moves, so a drag that
     /// starts on an already-selected clip carries the whole set.
-    pub fn clip_pressed(&mut self, id: &str, additive: bool, edge: i32) {
+    pub fn clip_pressed(&mut self, id: &str, additive: bool, edge: i32, alone: bool) {
         let Some(clip) = self.clip(id).cloned() else {
             return;
         };
         if self.locked(&clip.track_id) {
             return;
         }
+        self.alone_selection = alone;
         // Whatever the inspector still holds for the clip selected until
         // now lands before the selection moves: a commit flushed after the
         // change would look for it on the newly selected clip and lose it.
@@ -4726,6 +5054,15 @@ impl Studio {
         };
 
         self.begin_echo();
+        // The roll, slip and slide tools start gestures of their own
+        // (Royalty Studio fork).
+        if matches!(
+            self.lanes.tool,
+            TimelineTool::Roll | TimelineTool::Slip | TimelineTool::Slide
+        ) {
+            self.gesture = self.tool_gesture(&clip, edge).unwrap_or(Gesture::None);
+            return;
+        }
         if edge >= 0 && self.selection.len() <= 1 {
             self.gesture = Gesture::Trim {
                 clip: id.to_owned(),
@@ -4736,15 +5073,20 @@ impl Studio {
             };
             return;
         }
-        // What moves is what is selected, and nothing else. A detached
-        // sound is a clip of its own: it goes where it is dragged, and its
-        // picture stays, as any two clips do. It used to travel with its
-        // picture, which made Detach a split in name only (#265); the link
-        // between them is kept for Reattach, not for the drag.
+        // What moves is what is selected, and the clips linked to it
+        // (Royalty Studio fork): a picture and its sound go together, as in
+        // Premiere, unless linked selection is off or Alt took the clip
+        // alone - or the two were unlinked, which is what made Detach a
+        // split in name only when it could not be undone (#265).
         let moving = if self.selection.iter().any(|held| held == id) {
             self.selection.clone()
         } else {
             vec![id.to_owned()]
+        };
+        let moving = if self.edits_alone() {
+            moving
+        } else {
+            self.timeline().with_partners(&moving)
         };
         let origins = moving
             .iter()
@@ -4766,6 +5108,13 @@ impl Studio {
 
     /// The pointer moved: the echo follows it.
     pub fn clip_dragged(&mut self, seconds: f32, pixels: f32) {
+        if matches!(
+            self.gesture,
+            Gesture::Roll { .. } | Gesture::Slip { .. } | Gesture::Slide { .. }
+        ) {
+            self.tool_drag(seconds);
+            return;
+        }
         let gesture = std::mem::replace(&mut self.gesture, Gesture::None);
         match &gesture {
             Gesture::Move {
@@ -4793,17 +5142,29 @@ impl Studio {
                 let shift = seconds + self.snap_shift(&edges, threshold, &moving);
                 let rows = nearest_row(lanes, row_top(lanes, anchor.row) + pixels) - anchor.row;
                 let count = self.timeline().tracks.len() as i32;
+                // On lanes with kinds only the clips on lanes of the pressed
+                // clip's kind follow the pointer up and down, onto lanes that
+                // hold them: a picture dragged up a lane takes its sound
+                // along in time, not up into the pictures.
+                let timeline = self.timeline();
+                let pressed_kind = self
+                    .clip(primary)
+                    .map(|clip| timeline.track_kind(&clip.track_id));
                 let moves: Vec<ClipMove> = origins
                     .iter()
                     .filter_map(|origin| {
+                        let clip = self.clip(&origin.clip)?;
+                        let own = clip.track_id.clone();
+                        let follows = Some(timeline.track_kind(&own)) == pressed_kind;
                         let row = (origin.row + rows).clamp(0, count - 1);
                         let track_id = self
                             .row_track(row)
-                            .filter(|track| !self.locked(&track.id))
+                            .filter(|_| follows)
+                            .filter(|track| {
+                                !self.locked(&track.id) && track.kind.accepts(clip.kind)
+                            })
                             .map(|track| track.id.clone())
-                            .or_else(|| {
-                                self.clip(&origin.clip).map(|clip| clip.track_id.clone())
-                            })?;
+                            .unwrap_or(own);
                         Some(ClipMove {
                             clip_id: origin.clip.clone(),
                             start: f64::from((origin.start + shift).max(0.0)),
@@ -4893,6 +5254,9 @@ impl Studio {
                         self.seek((at - frame).max(start));
                     }
                 }
+                // The clips linked to it show the same trim (Royalty Studio
+                // fork), which the release's command gives them.
+                self.echo_partners_trimmed(&id, edge, start, duration);
             }
             Gesture::TransitionResize {
                 clip,
@@ -4921,13 +5285,52 @@ impl Studio {
             | Gesture::TextWidth { .. }
             | Gesture::TextHeight { .. }
             | Gesture::StageMask { .. }
-            | Gesture::Paint { .. } => {}
+            | Gesture::Paint { .. }
+            | Gesture::Roll { .. }
+            | Gesture::Slip { .. }
+            | Gesture::Slide { .. } => {}
         }
         self.gesture = gesture;
     }
 
+    /// Gives the clips linked to `id` in the echo the trim `id` has there
+    /// now, from the start and length it had when pressed (Royalty Studio
+    /// fork): the release trims them with it, and the drag shows it.
+    fn echo_partners_trimmed(&mut self, id: &str, edge: Edge, start: f32, duration: f32) {
+        if self.edits_alone() {
+            return;
+        }
+        let Some((now_start, now_duration)) = self
+            .echo
+            .as_ref()
+            .and_then(|echo| echo.active().clip(id))
+            .map(|clip| (clip.start, clip.duration))
+        else {
+            return;
+        };
+        let moved = now_start - f64::from(start);
+        let grown = now_duration - f64::from(duration);
+        let partners: Vec<Clip> = self.timeline().partners(id).into_iter().cloned().collect();
+        for partner in partners {
+            if let Some(clip) = self.echo_clip_mut(&partner.id) {
+                clip.duration = (partner.duration + grown).max(f64::from(MIN_DURATION));
+                if edge == Edge::Start {
+                    clip.start = partner.start + moved;
+                    clip.source_start = (partner.source_start + moved * partner.speed).max(0.0);
+                }
+            }
+        }
+    }
+
     /// The pointer let go: the whole gesture becomes one command.
     pub fn clip_released(&mut self) {
+        if matches!(
+            self.gesture,
+            Gesture::Roll { .. } | Gesture::Slip { .. } | Gesture::Slide { .. }
+        ) {
+            self.tool_release();
+            return;
+        }
         let gesture = std::mem::replace(&mut self.gesture, Gesture::None);
         let Some(echo) = self.echo.as_ref() else {
             return;
@@ -5019,7 +5422,10 @@ impl Studio {
             | Gesture::TextWidth { .. }
             | Gesture::TextHeight { .. }
             | Gesture::StageMask { .. }
-            | Gesture::Paint { .. }) => {
+            | Gesture::Paint { .. }
+            | Gesture::Roll { .. }
+            | Gesture::Slip { .. }
+            | Gesture::Slide { .. }) => {
                 self.gesture = other;
             }
         }
@@ -5325,7 +5731,7 @@ impl Studio {
                     text.content = value.to_owned();
                     let first = value.lines().next().unwrap_or("").trim().to_owned();
                     clip.name = if first.is_empty() {
-                        "Title".into()
+                        t("studio.untitledTitle")
                     } else {
                         first
                     };
@@ -7516,17 +7922,20 @@ impl Studio {
             })
             .map(|clip| clip.id.clone())
             .collect();
+        // A picture and its sound under the playhead are one clip to cut.
         let targets: Vec<String> = if self.selection.is_empty() {
+            let under = self.one_per_link(under);
             if under.len() > 1 {
                 self.notify(&t("studio.selectClipToCut"), true);
                 return;
             }
             under
         } else {
-            under
+            let chosen = under
                 .into_iter()
                 .filter(|id| self.selection.contains(id))
-                .collect()
+                .collect();
+            self.one_per_link(chosen)
         };
         self.delete_clips_to_playhead(&targets, side);
     }
@@ -7793,7 +8202,7 @@ impl Studio {
                     && at < clip.start + clip.duration - edge
             });
         let Some(clip) = target else {
-            self.notify("Park the playhead inside a picture clip to freeze", true);
+            self.notify(&t("studio.parkPlayheadToFreeze"), true);
             return;
         };
 
@@ -7863,8 +8272,8 @@ impl Studio {
     /// neighbours do not stack). Falls back to the menu target when the
     /// selection is empty.
     pub fn duplicate_selected(&mut self) {
-        let mut sources: Vec<Clip> = self
-            .selection
+        let named = self.without_linked_sounds(self.selection.clone());
+        let mut sources: Vec<Clip> = named
             .iter()
             .filter_map(|id| self.clip(id).cloned())
             .filter(|clip| !self.locked(&clip.track_id))
@@ -7883,10 +8292,16 @@ impl Studio {
             return;
         }
         sources.sort_by(|left, right| right.start.total_cmp(&left.start));
+        // One undo step for the lot, as a paste is.
+        self.flush_commit();
         let mut last = None;
         for source in &sources {
-            self.duplicate(source);
-            last = self.selection.first().cloned();
+            if let Some(created) = self.duplicate_in(source) {
+                last = Some(created);
+            }
+        }
+        if let Some(session) = self.session.as_mut() {
+            session.end_gesture();
         }
         if let Some(id) = last {
             self.selection = vec![id];
@@ -7894,12 +8309,14 @@ impl Studio {
     }
 
     /// A copy of `source` laid right after it on its own lane, selected.
-    pub fn duplicate(&mut self, source: &Clip) {
+    /// A copy of `source` right after it, inside the "duplicate" gesture:
+    /// the copy laid past the lane's end and its shaping were two undo
+    /// steps, and undoing the second left the whole source file on the
+    /// timeline (audit 2026-10-15, M4).
+    fn duplicate_in(&mut self, source: &Clip) -> Option<String> {
         let end = source.start + source.duration;
         let track_id = source.track_id.clone();
-        if let Some(created) = self.place_copy(source, &track_id, end, None) {
-            self.selection = vec![created];
-        }
+        self.place_copy(source, &track_id, end, Some("duplicate"))
     }
 
     /// Copy: the selected clips, or `anchor` alone when it is not among
@@ -7913,6 +8330,11 @@ impl Studio {
             && !ids.iter().any(|id| id == anchor)
         {
             ids = vec![anchor.to_owned()];
+        }
+        // The sound linked to a copied picture is held with it, so its mix
+        // comes back with the paste (Royalty Studio fork).
+        if !self.edits_alone() {
+            ids = self.timeline().with_partners(&ids);
         }
         let tracks = &self.timeline().tracks;
         let mut held: Vec<Held> = ids
@@ -7972,10 +8394,26 @@ impl Studio {
         });
         self.flush_commit();
         let mut created = Vec::new();
+        // A sound held with its picture comes back with the picture's
+        // paste, which lays it on a sound lane linked to the copy.
+        let with_picture: HashSet<String> = held
+            .iter()
+            .filter(|held| held.clip.kind != model::ClipKind::Audio)
+            .filter_map(|held| held.clip.link.clone())
+            .collect();
         for (held, place) in held.iter().zip(plan) {
             let Some((row, start)) = place else {
                 continue;
             };
+            if held.clip.kind == model::ClipKind::Audio
+                && held
+                    .clip
+                    .link
+                    .as_ref()
+                    .is_some_and(|link| with_picture.contains(link))
+            {
+                continue;
+            }
             if let Some(id) = self.place_copy(&held.clip, &tracks[row], start, Some("paste")) {
                 created.push(id);
             }
@@ -8002,9 +8440,8 @@ impl Studio {
         start: f64,
         gesture: Option<&str>,
     ) -> Option<String> {
-        if source.kind == model::ClipKind::Text {
-            return self.apply_in(
-                gesture,
+        if matches!(source.kind, model::ClipKind::Text | model::ClipKind::Shape) {
+            let made = if source.kind == model::ClipKind::Text {
                 Command::AddTextClip {
                     above: false,
                     track_id: Some(track_id.to_owned()),
@@ -8012,12 +8449,8 @@ impl Studio {
                     style: source.text.clone(),
                     duration: Some(source.duration),
                     offset_y: Some(source.offset_y),
-                },
-            );
-        }
-        if source.kind == model::ClipKind::Shape {
-            return self.apply_in(
-                gesture,
+                }
+            } else {
                 Command::AddShapeClip {
                     above: false,
                     track_id: Some(track_id.to_owned()),
@@ -8025,8 +8458,17 @@ impl Studio {
                     style: source.shape.clone(),
                     duration: Some(source.duration),
                     name: source.name.clone(),
-                },
-            );
+                }
+            };
+            let created = self.apply_in(gesture, made)?;
+            // The rest of its look, as footage gets: placement, keys, fades,
+            // opacity, blend and effects. A title used to come back with its
+            // style, length and height alone (audit 2026-10-12, 11 Oct #3).
+            // A title has no footage, so the trims and the speed are no-ops.
+            let placed = self.clip(&created).cloned()?;
+            let commands = copy_commands(source, &placed, track_id, start);
+            self.apply_in(gesture, Command::Batch { commands });
+            return Some(created);
         }
         let lane_end = self
             .timeline()
@@ -8035,19 +8477,114 @@ impl Studio {
             .filter(|clip| clip.track_id == track_id)
             .map(|clip| clip.start + clip.duration)
             .fold(0.0, f64::max);
-        let created = self.apply_in(
-            gesture,
+        // A sound - its own file, or a video's taken off its picture - is
+        // laid as a sound, not as the video it came from (Royalty Studio
+        // fork).
+        let add = if source.kind == model::ClipKind::Audio {
+            Command::AddSoundClip {
+                media_id: source.media_id.clone(),
+                track_id: track_id.to_owned(),
+                start: lane_end,
+            }
+        } else {
             Command::AddClip {
                 media_id: source.media_id.clone(),
                 track_id: track_id.to_owned(),
                 start: lane_end,
                 ripple: false,
-            },
-        )?;
+            }
+        };
+        // The sound linked to the source, before the copy is laid: the
+        // copy's own new sound takes its mix.
+        let sounds: Vec<Clip> = match self.clip(&source.id) {
+            Some(_) => self
+                .timeline()
+                .partners(&source.id)
+                .into_iter()
+                .cloned()
+                .collect(),
+            None => self
+                .clipboard
+                .iter()
+                .filter(|held| held.clip.link.is_some() && held.clip.link == source.link)
+                .filter(|held| held.clip.id != source.id)
+                .map(|held| held.clip.clone())
+                .collect(),
+        };
+        // Linked whatever the selection mode: the copy's trims and its move
+        // take its new sound along, or the two would be laid apart.
+        let scope = concat_project::Scope {
+            alone: false,
+            sound_inside: !self.prefs.splits_audio(),
+        };
+        let together = move |command: Command| Command::Scoped {
+            scope,
+            command: Box::new(command),
+        };
+        let created = self.apply_in(gesture, together(add))?;
         let placed = self.clip(&created).cloned()?;
         let commands = copy_commands(source, &placed, track_id, start);
-        self.apply_in(gesture, Command::Batch { commands });
+        self.apply_in(gesture, together(Command::Batch { commands }));
+        self.copy_sound_mix(&sounds, &created, gesture);
         Some(created)
+    }
+
+    /// Gives each sound linked to `picture` the mix of the one in `sounds`
+    /// that plays the same stream: what a copy of a picture and its sound
+    /// keeps of the sound (Royalty Studio fork).
+    fn copy_sound_mix(&mut self, sounds: &[Clip], picture: &str, gesture: Option<&str>) {
+        let made: Vec<Clip> = self
+            .timeline()
+            .partners(picture)
+            .into_iter()
+            .filter(|clip| clip.kind == model::ClipKind::Audio)
+            .cloned()
+            .collect();
+        let mut commands = Vec::new();
+        for new in made {
+            let Some(old) = sounds.iter().find(|old| {
+                old.kind == model::ClipKind::Audio && old.audio_stream == new.audio_stream
+            }) else {
+                continue;
+            };
+            commands.push(Command::UpdateClip {
+                clip_id: new.id.clone(),
+                patch: ClipPatch {
+                    volume: Some(old.volume),
+                    fade_in: Some(old.fade_in),
+                    fade_out: Some(old.fade_out),
+                    preserve_pitch: Some(old.preserve_pitch),
+                    filters: Some(old.filters.clone()),
+                    ..ClipPatch::default()
+                },
+            });
+        }
+        if !commands.is_empty() {
+            self.apply_in(gesture, Command::Batch { commands });
+        }
+    }
+
+    /// `ids` without the sounds linked to a picture among them: what a copy
+    /// or a duplicate lays again with the picture rather than on its own.
+    fn without_linked_sounds(&self, ids: Vec<String>) -> Vec<String> {
+        let timeline = self.timeline();
+        let pictures: HashSet<String> = ids
+            .iter()
+            .filter_map(|id| timeline.clip(id))
+            .filter(|clip| clip.kind != model::ClipKind::Audio)
+            .filter_map(|clip| clip.link.clone())
+            .collect();
+        ids.into_iter()
+            .filter(|id| {
+                timeline.clip(id).is_none_or(|clip| {
+                    clip.kind != model::ClipKind::Audio
+                        || !clip
+                            .link
+                            .as_ref()
+                            .is_some_and(|link| pictures.contains(link))
+                })
+            })
+            .collect()
     }
 
     /// What the tray's sound and word tools may do to the selection: one
@@ -8262,6 +8799,27 @@ impl Studio {
                         false,
                     );
                 }
+                // A project from before picture and sound lanes, given them
+                // (Royalty Studio fork): said, with where the old document
+                // is kept once the next save writes the new one.
+                if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.converted())
+                {
+                    self.notify(
+                        &tf(
+                            "studio.convertedToLanes",
+                            &[&concat_host::session::BEFORE_LANES],
+                        ),
+                        false,
+                    );
+                }
+                // Changes a window that died had not saved, newer than the
+                // document: offered back (Royalty Studio fork).
+                if let Some(document) = projects::recovery(&info.path) {
+                    self.confirm = Some(Confirm::Recover { document });
+                }
 
                 // Log missing media to file for debugging
                 if let Some(session) = &self.session {
@@ -8302,8 +8860,8 @@ impl Studio {
             return;
         };
         match concat_host::projects::clear_cache(&path) {
-            Ok(count) => self.notify(&format!("Cleared {count} cache files"), false),
-            Err(error) => self.notify(&format!("Cache clear failed: {error}"), true),
+            Ok(count) => self.notify(&tf("studio.clearedCacheFiles", &[&count]), false),
+            Err(error) => self.notify(&tf("studio.cacheClearFailed", &[&error]), true),
         }
         self.request_media_art();
         self.request_preview();
@@ -8334,6 +8892,21 @@ impl Studio {
                 log::warn!("project: could not be saved, not closing: {error}");
                 self.notify(&tf("studio.couldNotSave", &[&error]), true);
                 return Err(error);
+            }
+            projects::discard_recovery(&path, ticket);
+            // The undo history goes with the close, so a merge render the
+            // saved project does not use is nobody's now. Not while a merge
+            // runs: its folder is its own to clear.
+            if self.merge_job.is_none() {
+                let media = session
+                    .project()
+                    .media
+                    .iter()
+                    .map(|item| item.path.as_str());
+                let swept = projects::sweep_merged(std::path::Path::new(&path), media);
+                if swept > 0 {
+                    log::info!("project: swept {swept} unused merge renders");
+                }
             }
         }
         self.release_project();
@@ -8472,6 +9045,11 @@ impl Studio {
                 let mut pane = std::mem::take(&mut self.speech);
                 pane.update(msg, self);
                 self.speech = pane;
+            }
+            crate::panes::Msg::Generate(msg) => {
+                let mut pane = std::mem::take(&mut self.generate);
+                pane.update(msg, self);
+                self.generate = pane;
             }
             crate::panes::Msg::Voiceover(msg) => {
                 let mut pane = std::mem::take(&mut self.voiceover);
@@ -8837,6 +9415,13 @@ impl Studio {
         };
         self.prefs.dock = Some(desktop.saved());
         self.prefs.save(&self.host.dirs);
+        // A Scopes pane put out measures the frame that is showing, rather
+        // than waiting for the playhead to move (Royalty Studio fork).
+        if self.dock.contains(PaneKind::Scopes) && self.session.is_some() {
+            self.handle(crate::panes::Msg::Monitor(
+                crate::panes::monitor::MonitorMsg::Request,
+            ));
+        }
     }
 
     pub fn set_compact(&mut self, compact: bool) {
@@ -8878,8 +9463,44 @@ impl Studio {
     /// The monitor's picture alone: what a frame arriving during playback
     /// changes.
     pub fn publish_frame(&self, app: &App) {
-        app.global::<Editor>()
-            .set_preview_frame(self.monitor.image.clone());
+        let editor = app.global::<Editor>();
+        editor.set_preview_frame(self.monitor.image.clone());
+        // The scopes go with the frame they measured (Royalty Studio fork).
+        editor.set_scopes_ready(self.monitor.scopes.is_some());
+        if let Some(shots) = &self.monitor.scopes {
+            editor.set_scope_waveform(shots.waveform.clone());
+            editor.set_scope_parade(shots.parade.clone());
+            editor.set_scope_vector(shots.vectorscope.clone());
+            editor.set_scope_histogram(shots.histogram.clone());
+        }
+        editor.set_scope_view(self.prefs.scope_view.unwrap_or(0));
+    }
+
+    /// The scopes the Scopes pane wants of each frame, as
+    /// `concat_render::scopes` masks them; none while no Scopes pane is
+    /// out, so a frame costs nothing more (Royalty Studio fork).
+    pub fn scope_mask(&self) -> u32 {
+        use concat_host::preview::scopes;
+        if !self.dock.contains(crate::ui::PaneKind::Scopes) {
+            return 0;
+        }
+        match self.prefs.scope_view.unwrap_or(0) {
+            0 => scopes::WAVEFORM,
+            1 => scopes::PARADE,
+            2 => scopes::VECTORSCOPE,
+            3 => scopes::HISTOGRAM,
+            _ => scopes::ALL,
+        }
+    }
+
+    /// A scope chosen in the Scopes pane: remembered, and the frame at the
+    /// playhead measured again for it.
+    pub fn choose_scope(&mut self, view: i32) {
+        self.prefs.scope_view = Some(view.clamp(0, 4));
+        self.prefs.save(&self.host.dirs);
+        self.handle(crate::panes::Msg::Monitor(
+            crate::panes::monitor::MonitorMsg::Request,
+        ));
     }
 
     /// The timeline and the readouts that follow it: what runs on every
@@ -8901,13 +9522,25 @@ impl Studio {
 
         let timeline = self.timeline();
         let mut top = 0.0;
+        let names = lane_names(&timeline.tracks);
+        let first_sound = timeline
+            .tracks
+            .iter()
+            .rposition(|lane| lane.kind == model::TrackKind::Audio)
+            .filter(|_| {
+                timeline
+                    .tracks
+                    .iter()
+                    .any(|lane| lane.kind == model::TrackKind::Video)
+            });
         sync(
             &models.tracks,
             timeline
                 .tracks
                 .iter()
+                .enumerate()
                 .rev()
-                .map(|lane| {
+                .map(|(index, lane)| {
                     let height = self.lane_height(lane);
                     let row = TrackData {
                         id: lane.id.as_str().into(),
@@ -8917,12 +9550,29 @@ impl Studio {
                         size: self.lane_size(&lane.id),
                         height,
                         top,
+                        kind: match lane.kind {
+                            model::TrackKind::Any => 0,
+                            model::TrackKind::Video => 1,
+                            model::TrackKind::Audio => 2,
+                        },
+                        label: names[index].as_str().into(),
+                        divides: Some(index) == first_sound,
                     };
                     top += height;
                     row
                 })
                 .collect(),
         );
+        let implied = self.implied_selection();
+        // How many clips share each link, counted once rather than per clip.
+        let mut linked: HashMap<&str, usize> = HashMap::new();
+        for link in timeline
+            .clips
+            .iter()
+            .filter_map(|clip| clip.link.as_deref())
+        {
+            *linked.entry(link).or_default() += 1;
+        }
 
         // Only the clips near the view: what the lanes show plus a screen
         // either side; see `TimelinePane::published_span`.
@@ -8940,12 +9590,15 @@ impl Studio {
                     )
                 })
                 .map(|clip| {
-                    let wave =
-                        if matches!(clip.kind, model::ClipKind::Audio | model::ClipKind::Video) {
-                            self.wave(clip)
-                        } else {
-                            Default::default()
-                        };
+                    // A picture whose sound is on a lane of its own shows no
+                    // sound of its own: the wave is drawn under the sound.
+                    let wave = if clip.kind == model::ClipKind::Audio
+                        || (clip.kind == model::ClipKind::Video && clip.muted != Some(true))
+                    {
+                        self.wave(clip)
+                    } else {
+                        Default::default()
+                    };
                     ClipData {
                         id: clip.id.as_str().into(),
                         name: clip.name.as_str().into(),
@@ -8953,7 +9606,8 @@ impl Studio {
                         row: self.row_of(&clip.track_id),
                         start: clip.start as f32,
                         duration: clip.duration as f32,
-                        selected: self.selection.iter().any(|id| id == &clip.id),
+                        selected: self.selection.iter().any(|id| id == &clip.id)
+                            || implied.contains(&clip.id),
                         transition_selected: self
                             .selected_transition()
                             .is_some_and(|picked| picked.id == clip.id),
@@ -8975,7 +9629,15 @@ impl Studio {
                         wave: wave.0,
                         wave_from: wave.1,
                         wave_span: wave.2,
-                        has_audio: self.clip_has_sound(clip),
+                        // A picture whose sound is a linked clip on a sound
+                        // lane has no sound band: the sound is right there.
+                        has_audio: self.clip_has_sound(clip)
+                            && !(clip.kind == model::ClipKind::Video
+                                && clip.muted == Some(true)
+                                && clip
+                                    .link
+                                    .as_deref()
+                                    .is_some_and(|link| linked.get(link).is_some_and(|n| *n > 1))),
                         strip: self.strip_of(clip),
                     }
                 })
@@ -9028,7 +9690,12 @@ impl Studio {
             None => DropData::default(),
         });
 
-        editor.set_selected_clip(self.selected());
+        let selected = self.selected();
+        // The Motion tab's fields, for a motion graphic (Royalty Studio fork).
+        crate::motion::publish(self, app, selected.id.as_str());
+        // The Claude pane's note follows the project that is open.
+        crate::claude::publish(self, app);
+        editor.set_selected_clip(selected);
         editor.set_selected_transition(self.selected_transition_data());
         // The background and Fit and Fill, on their own global: the Details
         // panel, the Video panel and the phone all read it.
@@ -9096,6 +9763,10 @@ impl Studio {
         editor.set_timeline_current_tab(active as i32);
         editor.set_playhead(self.playhead);
         sync(&models.key_marks, self.key_marks());
+        sync(&models.markers, self.marker_data());
+        let (mark_in, mark_out) = self.timeline_marks();
+        editor.set_mark_in(mark_in.map_or(-1.0, |at| at as f32));
+        editor.set_mark_out(mark_out.map_or(-1.0, |at| at as f32));
         editor.set_scroll_left(self.lanes.scroll_left);
         editor.set_seconds_per_pixel(self.lanes.seconds_per_pixel);
         editor.set_duration_seconds(self.duration());
@@ -9103,6 +9774,26 @@ impl Studio {
         editor.set_tool(self.lanes.tool);
         editor.set_snap(self.lanes.snap);
         editor.set_magnetic(self.prefs.magnetic);
+        // The picture lanes on top, counted, for the line the pane draws
+        // between them and the sound lanes; none on a timeline whose lanes
+        // have no kinds, or that lacks one of the two (Royalty Studio fork).
+        let timeline = self.timeline();
+        let pictures = timeline
+            .tracks
+            .iter()
+            .filter(|lane| lane.kind == model::TrackKind::Video)
+            .count();
+        let sounds = timeline
+            .tracks
+            .iter()
+            .filter(|lane| lane.kind == model::TrackKind::Audio)
+            .count();
+        editor.set_video_rows(if pictures > 0 && sounds > 0 {
+            pictures as i32
+        } else {
+            0
+        });
+        editor.set_linked(self.prefs.links_selection());
         editor.set_trim_follow(self.prefs.trim_follow);
         editor.set_meters_shown(self.prefs.meters_shown());
         editor.set_preview_axis(self.prefs.preview_axis);
@@ -10258,6 +10949,11 @@ impl Studio {
             id: clip.id.as_str().into(),
             name: clip.name.as_str().into(),
             kind: kind_of(clip),
+            motion: self
+                .project()
+                .media
+                .iter()
+                .any(|item| item.id == clip.media_id && item.motion.is_some()),
             duration: clip.duration as f32,
             transition_id: clip
                 .transition_in
@@ -10740,9 +11436,9 @@ impl Studio {
         app.set_project_name(self.project_name.as_str().into());
         app.set_project_status(
             if self.dirty {
-                "unsaved changes"
+                t("studio.statusUnsaved")
             } else {
-                "saved"
+                t("studio.statusSaved")
             }
             .into(),
         );
@@ -10847,10 +11543,22 @@ impl Studio {
                 .filter(|item| item.origin == Some(model::MediaOrigin::Speech))
                 .count() as i32,
         );
+        editor.set_media_count_motion(
+            items
+                .iter()
+                .filter(|item| item.origin == Some(model::MediaOrigin::Motion))
+                .count() as i32,
+        );
         editor.set_media_count_processed(
             items
                 .iter()
                 .filter(|item| item.origin == Some(model::MediaOrigin::Processed))
+                .count() as i32,
+        );
+        editor.set_media_count_generated(
+            items
+                .iter()
+                .filter(|item| item.origin == Some(model::MediaOrigin::Generated))
                 .count() as i32,
         );
         editor.set_media_selected_count(self.media.selected.len() as i32);
@@ -10939,6 +11647,8 @@ impl Studio {
             self.speech.sample_detail_rows(self),
         );
         app.set_speech(self.speech.data(self));
+        app.set_generate(self.generate.data(self));
+        app.set_marker_sheet(self.marker_sheet_data());
         // The Audio page.
         sync(&models.sounds_mine, self.sounds.mine());
         sync(&models.sounds_concat, self.sounds.concat_rows());
@@ -10966,7 +11676,22 @@ impl Studio {
         app.set_voiceover(self.voiceover.data(self));
         editor.set_recording(self.voiceover.recording());
         editor.set_captions_open(self.captions.open);
+        editor.set_pauses_open(self.captions.open && self.captions.pauses);
+        let cuts: Vec<crate::ui::TimeSpan> = if self.captions.open && self.captions.pauses {
+            self.captions
+                .cut
+                .iter()
+                .map(|(start, end)| crate::ui::TimeSpan {
+                    start: *start as f32,
+                    end: *end as f32,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        editor.set_cuts(ModelRc::new(VecModel::from(cuts)));
         editor.set_speech_open(self.speech.open);
+        editor.set_generate_open(self.generate.open);
         editor.set_voiceover_open(self.voiceover.is_open());
 
         let bar = self.menu_bar();
@@ -11104,7 +11829,7 @@ impl Studio {
             ),
             action(
                 "freeze",
-                "Freeze frame".into(),
+                t("studio.freezeFrame"),
                 Glyph::Frame,
                 &keymap::label(&self.prefs, "freeze"),
                 straddled
@@ -11179,6 +11904,25 @@ impl Studio {
             ));
             rows.push(rule());
         }
+        // A picture and its sound edited as one, or taken apart (Royalty
+        // Studio fork): Unlink on a clip with partners, Link on a selection
+        // of several that are not.
+        let linked = !self.timeline().partners(&clip.id).is_empty();
+        let several = self.selection.len() > 1 && self.selection.contains(&clip.id);
+        if linked || several {
+            rows.push(action(
+                if linked { "unlink" } else { "link" },
+                if linked {
+                    t("studio.unlinkClips")
+                } else {
+                    t("studio.linkClips")
+                },
+                if linked { Glyph::Unlink } else { Glyph::Link },
+                &keymap::label(&self.prefs, "link"),
+                !locked,
+            ));
+            rows.push(rule());
+        }
         // The clip's sound, written out as it plays, as a file of its own
         // in the bin. For anything with sound in it; a clip whose track is
         // muted still renders, since the file is the clip's and not the
@@ -11200,6 +11944,15 @@ impl Studio {
                 "captions",
                 t("captions.generateCaptions"),
                 Glyph::TextMark,
+                "",
+                self.clip_has_sound(clip),
+            ));
+            // The pauses between its words, taken out of every lane
+            // (Royalty Studio fork).
+            rows.push(action(
+                "pauses",
+                t("pauses.title"),
+                Glyph::Razor,
                 "",
                 self.clip_has_sound(clip),
             ));
@@ -11634,7 +12387,18 @@ impl Studio {
 
     pub fn set_lane_size(&mut self, row: i32, size: TrackSize) {
         if let Some(id) = self.row_track(row).map(|track| track.id.clone()) {
-            self.lanes.lane_view.entry(id).or_default().size = size;
+            let view = self.lanes.lane_view.entry(id).or_default();
+            view.size = size;
+            view.height = None;
+        }
+    }
+
+    /// A lane's height dragged by hand at its edge in the header (Royalty
+    /// Studio fork), as Premiere's track boundaries are dragged.
+    pub fn resize_lane(&mut self, row: i32, height: f32) {
+        if let Some(id) = self.row_track(row).map(|track| track.id.clone()) {
+            self.lanes.lane_view.entry(id).or_default().height =
+                Some(height.clamp(LANE_MIN, LANE_MAX));
         }
     }
 
@@ -11787,6 +12551,7 @@ impl Studio {
             }
             // ⇧⌫, from the key table; plain ⌫ comes in as its own callback.
             "ripple-delete" => self.ripple_delete_selected(),
+            "link" => self.toggle_link(),
             // Copy takes the whole selection; see `copy_clips`.
             "copy" => self.copy_clips(None),
             "duplicate" | "mute" => {
@@ -11814,6 +12579,26 @@ impl Studio {
                 let after = self.sole_selection();
                 self.paste_clips(after.as_deref());
             }
+            // The cutting room's keys (Royalty Studio fork).
+            "marker" => self.marker_key(),
+            "prev-edit" => self.jump_edit(false),
+            "next-edit" => self.jump_edit(true),
+            "prev-marker" => self.jump_marker(false),
+            "next-marker" => self.jump_marker(true),
+            "shuttle-back" => self.shuttle(-1),
+            "shuttle-stop" => self.shuttle(0),
+            "shuttle-forward" => self.shuttle(1),
+            "mark-in" => self.mark(false),
+            "mark-out" => self.mark(true),
+            "clear-marks" => self.clear_marks(),
+            "insert-edit" => self.three_point(false),
+            "overwrite-edit" => self.three_point(true),
+            "lift" => self.lift_or_extract(false),
+            "extract" => self.lift_or_extract(true),
+            "roll-tool" => self.choose_tool(TimelineTool::Roll),
+            "slip-tool" => self.choose_tool(TimelineTool::Slip),
+            "slide-tool" => self.choose_tool(TimelineTool::Slide),
+            "select-tool" => self.lanes.tool = TimelineTool::Select,
             _ => {}
         }
     }
@@ -11938,6 +12723,13 @@ impl Studio {
             }
             "export-audio" => self.export_clip_audio(id),
             "detach" => self.detach_audio(&clip),
+            "unlink" => {
+                self.apply(Command::UnlinkClips {
+                    clip_ids: vec![id.to_owned()],
+                });
+                self.notify(&t("studio.unlinked"), false);
+            }
+            "link" => self.toggle_link(),
             "reattach" => {
                 self.apply(Command::ReattachAudio {
                     clip_id: id.to_owned(),
@@ -12097,6 +12889,28 @@ mod tests {
         wheel_partners, write_keyable,
     };
 
+    /// Lanes are named as Premiere names them: V1 just over the line
+    /// between pictures and sound, up from there; A1 just under it, down
+    /// from there. A lane of no kind has no name (Royalty Studio fork).
+    #[test]
+    fn lanes_are_named_out_from_the_line_between_pictures_and_sound() {
+        use concat_project::model::{Track, TrackKind};
+        let lanes = [
+            TrackKind::Audio,
+            TrackKind::Audio,
+            TrackKind::Video,
+            TrackKind::Video,
+            TrackKind::Video,
+        ]
+        .iter()
+        .enumerate()
+        .map(|(index, kind)| Track::of_kind(format!("t{index}"), *kind))
+        .collect::<Vec<_>>();
+        assert_eq!(super::lane_names(&lanes), ["A2", "A1", "V1", "V2", "V3"]);
+        let old = vec![Track::of_kind("t", TrackKind::Any)];
+        assert_eq!(super::lane_names(&old), [""]);
+    }
+
     /// A pasted group keeps its shape from `base` on, its rows shifted
     /// and held inside the lanes it lands in, a locked row passed over
     /// for the nearest open one; with no lane at all nothing lands.
@@ -12165,6 +12979,7 @@ mod tests {
                 has_audio: false,
                 audio_tracks: Vec::new(),
                 origin: None,
+                motion: None,
                 color_space: Default::default(),
             };
             let apply =
@@ -12554,6 +13369,7 @@ mod tests {
                     has_audio: true,
                     audio_tracks: Vec::new(),
                     origin: None,
+                    motion: None,
                     color_space: Default::default(),
                 },
             })

@@ -1393,13 +1393,19 @@ fn a_scene_linear_pass_mixes_by_intensity_in_light() {
 
 /// No look clips: a highlight four times SDR white comes out of every
 /// built-in look drawn in the display space brighter than white does, as
-/// light that went in brighter should.
+/// light that went in brighter should. Broadcast Safe is no look: holding
+/// the picture under a ceiling is the whole of what it does (Royalty Studio
+/// fork).
 #[test]
 fn every_look_carries_a_highlight_past_white() {
+    const HOLDS_LEVELS: [&str; 1] = ["concat.legal"];
     let Some(mut gpu) = gpu() else { return };
     let luma = |c: [f32; 4]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
     let mut clipped = Vec::new();
     for package in concat_effects::Catalogue::builtin().packages() {
+        if HOLDS_LEVELS.contains(&package.id()) {
+            continue;
+        }
         let display = package
             .manifest
             .wgsl

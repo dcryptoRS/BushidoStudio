@@ -59,11 +59,35 @@ export struct ShortcutData {
     custom: bool,
 }
 
+/// The Assistant and AI page (Royalty Studio fork): who the assistant
+/// works for and what it may touch, and the generating services' keys and
+/// models. A list is one entry per line.
+export struct AssistantData {
+    name: string,
+    footage: string,
+    protected: string,
+    /// concat-studio's server as typed, and where one was found
+    studio: string,
+    studio-found: string,
+    higgsfield-id: string,
+    higgsfield-secret: string,
+    seedance: string,
+    gemini: string,
+    higgsfield-video: string,
+    higgsfield-image: string,
+    seedance-model: string,
+    seedance-base: string,
+    gemini-model: string,
+    /// the keys are in the desktop's keyring, not a file
+    keyring: bool,
+}
+
 export struct SettingsData {
     open: bool,
     /// 0 General, 1 Appearance, 2 Transcriber, 3 Speech, 4 Remote, 5 About,
-    /// 6 Version, 7 Shortcuts
+    /// 6 Version, 7 Shortcuts, 8 Assistant and AI
     tab: int,
+    assistant: AssistantData,
     language: int,
     /// what the log records: 0 errors only, 1 warnings, 2 normal, 3
     /// debug, 4 everything
@@ -78,6 +102,12 @@ export struct SettingsData {
     gpu-switchable: bool,
     /// the magnetic timeline: deleting and trimming close the gap
     magnetic: bool,
+    /// a video's sound goes on a sound lane, linked to the picture
+    split-audio: bool,
+    /// a click on a clip takes the clips linked to it along
+    linked-selection: bool,
+    /// every change saved as it is made, as Resolve's Live Save does
+    autosave: bool,
     /// where model downloads look first: automatic, Concat's mirror,
     /// hf-mirror.com, the original source, a custom URL
     download-source: int,
@@ -580,6 +610,114 @@ component ShortcutRow inherits Rectangle {
     }
 }
 
+/// A key typed into the Assistant and AI page: dots until its eye is
+/// pressed, as the token is (Royalty Studio fork).
+component KeyField inherits HorizontalLayout {
+    in property <string> value;
+    in property <string> placeholder;
+    callback edited(text: string);
+    property <bool> shown;
+
+    spacing: 6px;
+
+    Field {
+        value: root.value;
+        placeholder: root.placeholder;
+        technical: true;
+        secret: !root.shown;
+        edited(text) => { root.edited(text); }
+    }
+
+    Button {
+        square: true;
+        glyph: root.shown ? Glyph.eye-off : Glyph.eye;
+        label: root.shown ? I18n.t("settings.hideKey") : I18n.t("settings.showKey");
+        clicked => { root.shown = !root.shown; }
+    }
+}
+
+/// A technical field with what it is beside it: a model, an address.
+component NamedField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <string> placeholder;
+    callback edited(text: string);
+
+    spacing: 8px;
+
+    Text {
+        width: 110px;
+        text: root.label;
+        color: Theme.fg-muted;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Field {
+        value: root.value;
+        placeholder: root.placeholder;
+        technical: true;
+        edited(text) => { root.edited(text); }
+    }
+}
+
+/// A list typed one entry per line: folders, names. Seeded from `value`
+/// and then left alone, as a Field is, so a line half typed is not taken
+/// back (Royalty Studio fork).
+component LinesField inherits Rectangle {
+    in property <string> value;
+    in property <string> placeholder;
+    callback edited(text: string);
+    property <string> draft;
+
+    init => { root.draft = root.value; }
+    changed value => {
+        if (!input.has-focus) {
+            root.draft = root.value;
+        }
+    }
+
+    min-height: 72px;
+    max-height: 72px;
+    border-radius: Theme.r;
+    background: touch.has-hover && !input.has-focus ? Theme.field-hover : Theme.field;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Colors.transparent;
+    clip: true;
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+
+    input := TextInput {
+        x: 10px;
+        y: 6px;
+        width: parent.width - 20px;
+        height: parent.height - 12px;
+        text <=> root.draft;
+        single-line: false;
+        wrap: word-wrap;
+        color: Theme.fg;
+        font-family: Theme.font-technical;
+        font-size: Theme.fs;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.on-accent;
+        edited => { root.edited(self.text); }
+    }
+
+    if root.draft == "" && !input.has-focus: Text {
+        x: 10px;
+        y: 6px;
+        width: parent.width - 20px;
+        text: root.placeholder;
+        color: Theme.fg-dim;
+        font-size: Theme.fs;
+        wrap: word-wrap;
+    }
+}
+
 export component SettingsDialog inherits Modal {
     in property <SettingsData> data;
     in property <[ModelData]> transcribers;
@@ -620,6 +758,11 @@ export component SettingsDialog inherits Modal {
     callback proxies-changed(on: bool);
     callback gpu-changed(on: bool);
     callback magnetic-changed(on: bool);
+    callback split-audio-changed(on: bool);
+    callback linked-selection-changed(on: bool);
+    callback autosave-changed(on: bool);
+    /// A field of the Assistant and AI page, by its name, and its text.
+    callback assistant-edited(field: string, text: string);
     callback download-source-changed(index: int);
     callback download-base-edited(text: string);
     callback server-enabled-changed(on: bool);
@@ -654,7 +797,7 @@ export component SettingsDialog inherits Modal {
     /// that only ever reached `I18n.t` through a variable would never be
     /// offered to a translator.
     property <[string]> accent-labels: [
-        I18n.t("settings.lime"), I18n.t("settings.sky"),
+        I18n.t("settings.blue"), I18n.t("settings.lime"), I18n.t("settings.sky"),
         I18n.t("settings.violet"), I18n.t("settings.rose"), I18n.t("settings.amber"),
         I18n.t("settings.mint"),
     ];
@@ -681,6 +824,7 @@ export component SettingsDialog inherits Modal {
         {label: I18n.t("settings.shortcuts"), glyph: Glyph.keyboard, page: 7, desk: true},
         {label: I18n.t("common.transcriber"), glyph: Glyph.waveform, page: 2, desk: false},
         {label: I18n.t("common.speech"), glyph: Glyph.music, page: 3, desk: false},
+        {label: I18n.t("settings.assistant"), glyph: Glyph.sparkle, page: 8, desk: true},
         {label: I18n.t("settings.automation"), glyph: Glyph.lock, page: 4, desk: true},
         {label: I18n.t("settings.version"), glyph: Glyph.tag, page: 6, desk: true},
         {label: I18n.t("settings.about"), glyph: Glyph.sparkle, page: 5, desk: false},
@@ -926,6 +1070,46 @@ export component SettingsDialog inherits Modal {
                     on: root.data.magnetic;
                     open: false;
                     switched(on) => { root.magnetic-changed(on); }
+                }
+
+                // A video with sound placed on picture and sound lanes: on,
+                // the picture on a picture lane and its sound on a sound
+                // lane, linked; off, the sound stays inside the clip
+                // (Royalty Studio fork).
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.splitAudio");
+                    hint: I18n.t("settings.splitAudioHint");
+                    switchable: true;
+                    on: root.data.split-audio;
+                    open: false;
+                    switched(on) => { root.split-audio-changed(on); }
+                }
+
+                // A picture and its sound selected and edited as one; off,
+                // each on its own, as Alt does for one click.
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.linkedSelection");
+                    hint: I18n.t("settings.linkedSelectionHint");
+                    switchable: true;
+                    on: root.data.linked-selection;
+                    open: false;
+                    switched(on) => { root.linked-selection-changed(on); }
+                }
+
+                // On, every change is saved a moment after it is made; off,
+                // Save writes the project, closing asks first and a recovery
+                // copy keeps the changes if the window dies (Royalty Studio
+                // fork, after Resolve's Live Save).
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.autosave");
+                    hint: I18n.t("settings.autosaveHint");
+                    switchable: true;
+                    on: root.data.autosave;
+                    open: false;
+                    switched(on) => { root.autosave-changed(on); }
                 }
 
                 // Off, the playhead goes wherever the ruler is clicked, past
@@ -1447,6 +1631,135 @@ export component SettingsDialog inherits Modal {
                 }
             }
 
+            // Assistant and AI (Royalty Studio fork): who the Claude panel
+            // works for and what it must leave alone, then the services that
+            // make clips and pictures, their keys and their models.
+            if root.data.tab == 8 && !root.phone: VerticalLayout {
+                DialogSection {
+                    ruled: false;
+                    first: true;
+                    title: I18n.t("settings.assistantName");
+                    hint: I18n.t("settings.assistantNameHint");
+                    Field {
+                        value: root.data.assistant.name;
+                        placeholder: I18n.t("settings.assistantNamePlaceholder");
+                        edited(text) => { root.assistant-edited("name", text); }
+                    }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.footageFolders");
+                    hint: I18n.t("settings.footageFoldersHint");
+                    LinesField {
+                        value: root.data.assistant.footage;
+                        placeholder: "~/Videos\n/run/media/…";
+                        edited(text) => { root.assistant-edited("footage", text); }
+                    }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.protectedFolders");
+                    hint: I18n.t("settings.protectedFoldersHint");
+                    LinesField {
+                        value: root.data.assistant.protected;
+                        placeholder: I18n.t("settings.protectedPlaceholder");
+                        edited(text) => { root.assistant-edited("protected", text); }
+                    }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.studioServer");
+                    hint: root.data.assistant.studio-found != ""
+                        ? I18n.t1("settings.studioServerFound", root.data.assistant.studio-found)
+                        : I18n.t("settings.studioServerMissing");
+                    Field {
+                        value: root.data.assistant.studio;
+                        placeholder: "~/dev/concat-studio/bin/concat-studio-mcp";
+                        technical: true;
+                        edited(text) => { root.assistant-edited("studio", text); }
+                    }
+                }
+
+                DialogSection {
+                    title: "Higgsfield";
+                    hint: I18n.t("settings.higgsfieldHint");
+                    KeyField {
+                        value: root.data.assistant.higgsfield-id;
+                        placeholder: I18n.t("settings.keyId");
+                        edited(text) => { root.assistant-edited("higgsfield-id", text); }
+                    }
+                    KeyField {
+                        value: root.data.assistant.higgsfield-secret;
+                        placeholder: I18n.t("settings.keySecret");
+                        edited(text) => { root.assistant-edited("higgsfield-secret", text); }
+                    }
+                    NamedField {
+                        label: I18n.t("settings.videoModel");
+                        value: root.data.assistant.higgsfield-video;
+                        placeholder: "bytedance/seedance-2.5";
+                        edited(text) => { root.assistant-edited("higgsfield-video", text); }
+                    }
+                    NamedField {
+                        label: I18n.t("settings.pictureModel");
+                        value: root.data.assistant.higgsfield-image;
+                        placeholder: "higgsfield-ai/soul/v2/standard";
+                        edited(text) => { root.assistant-edited("higgsfield-image", text); }
+                    }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: "Seedance 2.5 (BytePlus ModelArk)";
+                    hint: I18n.t("settings.seedanceHint");
+                    KeyField {
+                        value: root.data.assistant.seedance;
+                        placeholder: I18n.t("settings.apiKey");
+                        edited(text) => { root.assistant-edited("seedance", text); }
+                    }
+                    NamedField {
+                        label: I18n.t("settings.model");
+                        value: root.data.assistant.seedance-model;
+                        placeholder: "dreamina-seedance-2-5-260628";
+                        edited(text) => { root.assistant-edited("seedance-model", text); }
+                    }
+                    NamedField {
+                        label: I18n.t("settings.endpoint");
+                        value: root.data.assistant.seedance-base;
+                        placeholder: "https://ark.ap-southeast.bytepluses.com/api/v3";
+                        edited(text) => { root.assistant-edited("seedance-base", text); }
+                    }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: "Gemini";
+                    hint: I18n.t("settings.geminiHint");
+                    KeyField {
+                        value: root.data.assistant.gemini;
+                        placeholder: I18n.t("settings.apiKey");
+                        edited(text) => { root.assistant-edited("gemini", text); }
+                    }
+                    NamedField {
+                        label: I18n.t("settings.pictureModel");
+                        value: root.data.assistant.gemini-model;
+                        placeholder: "gemini-nano-banana-2.1";
+                        edited(text) => { root.assistant-edited("gemini-model", text); }
+                    }
+
+                    // Where the keys went, under the last of them: inside
+                    // the section, so it wraps to the page's width.
+                    Text {
+                        text: root.data.assistant.keyring ? I18n.t("settings.keysInKeyring") : I18n.t("settings.keysInFile");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
             // The Version page: which release this is, whether a newer one
             // is out, and any release from 0.2.5 on put in this one's place.
             // A desk's affair, like the Automation page: a phone's store does
@@ -1504,6 +1817,10 @@ export component SettingsDialog inherits Modal {
                                 horizontal-stretch: 1;
                                 options: root.versions;
                                 details: root.version-details;
+                                // A pick sets the control's own value, cutting this binding: this
+                                // follows the data and puts it back (audit 2026-10-12, #8).
+                                property <int> wanted: root.data.version-choice;
+                                changed wanted => { self.current = self.wanted; }
                                 current: root.data.version-choice;
                                 placeholder: I18n.t("settings.noReleasesYet");
                                 enabled: root.versions.length > 0 && !root.data.installing;

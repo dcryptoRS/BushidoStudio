@@ -57,6 +57,7 @@ impl Gpu {
         };
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends,
+            flags: instance_flags(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         // CONCAT_GPU=software opens the software rasteriser - WARP on
@@ -164,4 +165,13 @@ pub fn driver_of(info: &wgpu::AdapterInfo) -> String {
     } else {
         format!("driver {named}")
     }
+}
+
+/// The instance's flags: the build's, without debug labels on Vulkan
+/// objects unless `WGPU_DEBUG` asks for them. Debug builds set them, and
+/// on NVIDIA's Vulkan driver two compositors naming their buffers on two
+/// threads at once crashed in the loader (`vkSetDebugUtilsObjectNameEXT`),
+/// which took the export tests down at random (Royalty Studio fork).
+pub fn instance_flags() -> wgpu::InstanceFlags {
+    (wgpu::InstanceFlags::from_build_config() - wgpu::InstanceFlags::DEBUG).with_env()
 }

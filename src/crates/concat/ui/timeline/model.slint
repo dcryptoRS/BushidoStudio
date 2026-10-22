@@ -24,6 +24,22 @@ export enum TimelineTool {
     select,
     /// click a clip to cut it where the pointer is; B turns it on and off
     split,
+    /// drag a cut between two clips: one ends later as the other starts
+    /// later (R; Royalty Studio fork)
+    roll,
+    /// drag a clip to show other frames of its file in the same place (Y)
+    slip,
+    /// drag a clip along its lane, its neighbours giving way (U)
+    slide,
+}
+
+/// A marker on the ruler (Royalty Studio fork).
+export struct MarkerData {
+    id: string,
+    /// seconds on the timeline
+    time: float,
+    name: string,
+    tint: color,
 }
 
 /// One tab. A project holds several timelines the way it holds sequences in
@@ -48,6 +64,13 @@ export enum TrackSize { auto, small, medium, large }
 /// One lane. Deliberately untyped: any media goes on any track, which is why
 /// every lane carries both a visibility and a mute switch rather than one or
 /// the other.
+/// A stretch of the timeline, in seconds (Royalty Studio fork): a pause
+/// Cut Pauses found, drawn over the lanes before it is cut.
+export struct TimeSpan {
+    start: float,
+    end: float,
+}
+
 export struct TrackData {
     id: string,
     visible: bool,
@@ -64,6 +87,15 @@ export struct TrackData {
     /// nothing can be dropped onto it. A lane you can see and hear and still
     /// knock sideways by accident is the one every editor locks.
     locked: bool,
+    /// What the lane holds (Royalty Studio fork): 0 anything - a lane from
+    /// before lanes had kinds - 1 pictures, 2 sound.
+    kind: int,
+    /// The lane's name, "V1" up from the line between pictures and sound,
+    /// "A1" down from it; empty on a lane of no kind.
+    label: string,
+    /// The first sound lane under the pictures: the line between the two is
+    /// drawn along its top.
+    divides: bool,
 }
 
 /// A media item's filmstrip and the window of it one clip shows.
@@ -351,6 +383,9 @@ export struct SelectedClipData {
     frame-height: int,
     name: string,
     kind: ClipKind,
+    /// The clip's media is a motion graphic with its recipe, which the
+    /// Motion tab edits (Royalty Studio fork).
+    motion: bool,
     /// Seconds, and the ceiling on a fade: longer than half the clip and the
     /// two ramps would overlap.
     duration: float,

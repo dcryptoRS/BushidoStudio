@@ -47,6 +47,7 @@ mod ios;
 mod keymap;
 mod live;
 mod meters;
+mod motion;
 mod platform;
 /// What a phone's own crate installs before the window runs: the way to
 /// the system's file picker, and where a finished export is put so the
@@ -97,6 +98,7 @@ use host::{Host, Shell};
 use panes::Msg;
 use panes::captions::CaptionsMsg;
 use panes::export::ExportMsg;
+use panes::generate::GenerateMsg;
 use panes::media_bin::MediaMsg;
 use panes::monitor::MonitorMsg;
 use panes::project::ProjectMsg;
@@ -338,6 +340,27 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // Claude there may use only Concat's and concat-studio's tools and read
     // files; see `claude::ALLOWED`.
     claude::install(&app);
+    // The Motion tab: a motion graphic's recipe, rendered again by
+    // concat-studio with the tab's edits.
+    motion::install(&app);
+    // The encoders an export could use, opened once on a thread of their
+    // own: the export sheet reads what they said on every publish, and the
+    // first publish opened NVENC and an AV1 encoder on this thread, holding
+    // the first frame (audit 2026-10-15, M12). Publishes again when known.
+    let _ = std::thread::Builder::new()
+        .name("encoders".to_owned())
+        .spawn(|| {
+            for codec in concat_media::VideoCodec::ALL {
+                codec.encodable();
+            }
+            let _ = slint::invoke_from_event_loop(|| {
+                crate::host::Shell::with(|shell, app| {
+                    if let Ok(studio) = shell.studio.try_borrow() {
+                        studio.publish(&app, &shell.models);
+                    }
+                });
+            });
+        });
 
     // The machine's fonts, for the Text inspector's picker. Read on a
     // worker: on a machine with a few thousand faces it is a moment, and
@@ -385,6 +408,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         app.global::<KeyEditor>()
             .set_rows(ModelRc::from(models.key_editor_rows.clone()));
         editor.set_key_marks(ModelRc::from(models.key_marks.clone()));
+        editor.set_markers(ModelRc::from(models.markers.clone()));
         app.global::<Library>()
             .set_views(ModelRc::from(models.library_views.clone()));
         editor.set_menu_items(ModelRc::from(models.menu.clone()));
@@ -537,6 +561,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         log::info!("close: titlebar X pressed");
         Shell::with(|shell, app| {
             shell.studio.borrow_mut().remember_dock();
+            // Autosave off and changes unsaved: asked first.
+            if shell.studio.borrow().wants_save_question() {
+                shell
+                    .studio
+                    .borrow_mut()
+                    .ask_save_changes(studio::AfterClose::Quit);
+                shell.studio.borrow().publish(&app, &shell.models);
+                return;
+            }
             let outcome = close_window(
                 || shell.studio.borrow_mut().close_project(),
                 || {
@@ -564,6 +597,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         let saved = std::cell::Cell::new(true);
         Shell::with(|shell, app| {
             shell.studio.borrow_mut().remember_dock();
+            if shell.studio.borrow().wants_save_question() {
+                saved.set(false);
+                shell
+                    .studio
+                    .borrow_mut()
+                    .ask_save_changes(studio::AfterClose::Quit);
+                shell.studio.borrow().publish(&app, &shell.models);
+                return;
+            }
             let outcome = close_window(
                 || shell.studio.borrow_mut().close_project(),
                 || {
@@ -678,6 +720,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     app.on_start_forget_recent(on_window!(|state, path: SharedString| {
         state.handle(Msg::Start(StartMsg::ForgetRecent(path.to_string())));
+    }));
+    app.on_start_trash_recent(on_window!(|state, path: SharedString| {
+        state.handle(Msg::Start(StartMsg::TrashRecent(path.to_string())));
     }));
     app.on_start_reveal_recent(on_window!(|state, path: SharedString| {
         state.handle(Msg::Start(StartMsg::RevealRecent(path.to_string())));
@@ -999,6 +1044,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     editor.on_magnetic_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Timeline(TimelineMsg::MagneticChanged(on)));
     }));
+    editor.on_linked_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Settings(SettingsMsg::LinkedSelectionChanged(on)));
+    }));
     editor.on_trim_follow_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Timeline(TimelineMsg::TrimFollowChanged(on)));
     }));
@@ -1076,17 +1124,19 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     editor.on_track_sized(on_window!(|state, row: i32, size: TrackSize| {
         state.set_lane_size(row, size);
     }));
+    editor.on_track_resized(on_window!(|state, row: i32, height: f32| {
+        state.resize_lane(row, height);
+    }));
     editor.on_track_removed(on_window!(|state, row: i32| {
         state.ask_remove_track(row);
     }));
 
     // ── the gestures ──
-    editor.on_clip_pressed(on_lanes!(|state,
-                                      id: SharedString,
-                                      additive: bool,
-                                      edge: i32| {
-        state.clip_pressed(id.as_str(), additive, edge);
-    }));
+    editor.on_clip_pressed(on_lanes!(
+        |state, id: SharedString, additive: bool, edge: i32, alone: bool| {
+            state.clip_pressed(id.as_str(), additive, edge, alone);
+        }
+    ));
     editor.on_clip_split(on_lanes!(|state, id: SharedString, seconds: f32| {
         state.split_clip_at(&id, seconds);
     }));
@@ -1543,6 +1593,14 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                 state.handle(Msg::Captions(CaptionsMsg::OpenOnClip(id)));
                 return;
             }
+            // Cut Pauses on this clip's voice (Royalty Studio fork).
+            if action.as_str() == "pauses" {
+                state.flush_commit();
+                state.transition_selected = None;
+                state.selection = vec![id.clone()];
+                state.handle(Msg::Captions(CaptionsMsg::OpenForPauses(Some(id))));
+                return;
+            }
             state.clip_action(&id, action.as_str());
         }
     }));
@@ -1723,6 +1781,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     app.on_confirm_dismissed(on_window!(|state| {
         state.confirm = None;
+    }));
+    app.on_confirm_chosen(on_window!(|state| {
+        state.confirm_chosen();
     }));
 
     app.on_relink_all(on_window!(|state| {
@@ -1915,6 +1976,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     app.on_settings_magnetic_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Settings(SettingsMsg::MagneticChanged(on)));
     }));
+    app.on_settings_split_audio_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Settings(SettingsMsg::SplitAudioChanged(on)));
+    }));
+    app.on_settings_linked_selection_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Settings(SettingsMsg::LinkedSelectionChanged(on)));
+    }));
+    app.on_settings_autosave_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Settings(SettingsMsg::AutosaveChanged(on)));
+    }));
     app.on_settings_download_source_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Settings(SettingsMsg::DownloadSourceChanged(index)));
     }));
@@ -1942,6 +2012,14 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             text.to_string(),
         )));
     }));
+    app.on_settings_assistant_edited(on_window!(
+        |state, field: SharedString, text: SharedString| {
+            state.handle(Msg::Settings(SettingsMsg::AssistantEdited {
+                field: field.to_string(),
+                text: text.to_string(),
+            }));
+        }
+    ));
     app.on_settings_server_token_generated(on_window!(|state| {
         state.handle(Msg::Settings(SettingsMsg::ServerTokenGenerated));
     }));
@@ -1978,6 +2056,14 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             CaptionsMsg::Close
         } else {
             CaptionsMsg::Open
+        };
+        state.handle(Msg::Captions(msg));
+    }));
+    editor.on_pauses_tool(on_window!(|state| {
+        let msg = if state.captions.open && state.captions.pauses {
+            CaptionsMsg::Close
+        } else {
+            CaptionsMsg::OpenForPauses(None)
         };
         state.handle(Msg::Captions(msg));
     }));
@@ -2028,6 +2114,56 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         };
         state.handle(Msg::Speech(msg));
     }));
+    // The Scopes pane's choice of scope (Royalty Studio fork).
+    editor.on_scope_view_changed(on_window!(|state, view: i32| {
+        state.choose_scope(view);
+    }));
+    // Generate with AI (Royalty Studio fork).
+    editor.on_generate(on_window!(|state| {
+        state.handle(Msg::Generate(GenerateMsg::Toggle));
+    }));
+    app.on_generate_closed(on_window!(|state| {
+        state.handle(Msg::Generate(GenerateMsg::Close));
+    }));
+    app.on_generate_prompt_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Generate(GenerateMsg::PromptEdited(text.to_string())));
+    }));
+    app.on_generate_changed(on_window!(|state, field: SharedString, value: i32| {
+        state.handle(Msg::Generate(GenerateMsg::Changed(
+            field.to_string(),
+            value,
+        )));
+    }));
+    app.on_generate_begin(on_window!(|state| {
+        state.handle(Msg::Generate(GenerateMsg::Begin));
+    }));
+    app.on_generate_cancel(on_window!(|state| {
+        state.handle(Msg::Generate(GenerateMsg::Cancel));
+    }));
+    app.on_generate_open_settings(on_window!(|state| {
+        state.handle(Msg::Generate(GenerateMsg::OpenSettings));
+    }));
+    // Markers on the ruler, and their sheet (Royalty Studio fork).
+    editor.on_marker_moved(on_window!(|state, id: SharedString, to: f32| {
+        state.marker_moved(&id, to);
+    }));
+    editor.on_marker_opened(on_window!(|state, id: SharedString| {
+        state.open_marker(&id);
+    }));
+    app.on_marker_sheet_closed(on_window!(|state| {
+        state.close_marker();
+    }));
+    app.on_marker_sheet_name_edited(on_window!(|state, text: SharedString| {
+        if let Some(sheet) = state.marker_sheet.as_mut() {
+            sheet.name = text.to_string();
+        }
+    }));
+    app.on_marker_sheet_color(on_window!(|state, index: i32| {
+        state.colour_marker(index);
+    }));
+    app.on_marker_sheet_deleted(on_window!(|state| {
+        state.delete_marker();
+    }));
 
     app.on_captions_closed(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::Close));
@@ -2061,6 +2197,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     app.on_captions_export_srt(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::ExportSrt));
+    }));
+    app.on_captions_words_toggled(on_window!(|state, on: bool| {
+        state.handle(Msg::Captions(CaptionsMsg::WordsToggled(on)));
+    }));
+    app.on_captions_pause_rule_changed(on_window!(|state, which: i32, seconds: f32| {
+        state.handle(Msg::Captions(CaptionsMsg::PauseRuleChanged(which, seconds)));
+    }));
+    app.on_captions_cut_pauses(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::CutPauses));
     }));
     app.on_speech_closed(on_window!(|state| {
         state.handle(Msg::Speech(SpeechMsg::Close));
@@ -2142,8 +2287,13 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                         "close-project" => {
                             // Back to the launch screen, not out of the
                             // app: a failed save keeps the project open and
-                            // the notice below lands it on screen.
-                            let _ = state.close_project();
+                            // the notice below lands it on screen. With
+                            // autosave off and changes unsaved, asked first.
+                            if state.wants_save_question() {
+                                state.ask_save_changes(studio::AfterClose::Start);
+                            } else {
+                                let _ = state.close_project();
+                            }
                         }
                         "undo" => state.undo(),
                         "redo" => state.redo(),
@@ -2182,7 +2332,13 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                         _ => {}
                     }
                 }
-                if action == "close-window" {
+                if action == "close-window" && shell.studio.borrow().wants_save_question() {
+                    shell
+                        .studio
+                        .borrow_mut()
+                        .ask_save_changes(studio::AfterClose::Quit);
+                    shell.studio.borrow().publish(&app, &shell.models);
+                } else if action == "close-window" {
                     log::info!("close: File > Close Window");
                     let outcome = close_window(
                         || shell.studio.borrow_mut().close_project(),

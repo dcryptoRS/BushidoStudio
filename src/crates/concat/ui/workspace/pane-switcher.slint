@@ -41,6 +41,9 @@ export enum PaneKind {
     keyframes,
     /// a conversation with Claude, which edits the project on screen
     claude,
+    /// the video scopes: waveform, parade, vectorscope, histogram (Royalty
+    /// Studio fork)
+    scopes,
 }
 
 export global Panes {
@@ -63,6 +66,7 @@ export global Panes {
             : kind == PaneKind.inspector ? I18n.t("paneSwitcher.inspector")
             : kind == PaneKind.keyframes ? I18n.t("common.keyframes")
             : kind == PaneKind.claude ? "Claude"
+            : kind == PaneKind.scopes ? I18n.t("scopes.title")
             : I18n.t("paneSwitcher.timeline");
     }
 
@@ -75,6 +79,7 @@ export global Panes {
             : kind == PaneKind.inspector ? "inspector"
             : kind == PaneKind.keyframes ? "keyframes"
             : kind == PaneKind.claude ? "claude"
+            : kind == PaneKind.scopes ? "scopes"
             : "timeline";
     }
 
@@ -88,6 +93,7 @@ export global Panes {
             : kind == PaneKind.inspector ? Glyph.settings
             : kind == PaneKind.keyframes ? Glyph.keyframe
             : kind == PaneKind.claude ? Glyph.sparkle
+            : kind == PaneKind.scopes ? Glyph.scope
             : Glyph.rows;
     }
 }
@@ -259,7 +265,7 @@ export component PaneSwitcher inherits Rectangle {
     /// somewhere to be laid out. When the Keyframes row arrived this still
     /// said four, and the row that removes the panel was the one under the
     /// clip.
-    property <length> list-h: 6 * 26px + 9px + 26px + 8px;
+    property <length> list-h: 7 * 26px + 9px + 26px + 8px;
     /// The whole list when the window has room for it under the button, and
     /// the room otherwise, with the rest reached by scrolling. Never under
     /// three rows: shorter than that is not a list worth scrolling, and
@@ -405,6 +411,11 @@ export component PaneSwitcher inherits Rectangle {
                         chosen => { menu.close(); root.picked(PaneKind.claude); }
                     }
                     SwitchRow {
+                        kind: PaneKind.scopes;
+                        current: root.kind == PaneKind.scopes;
+                        chosen => { menu.close(); root.picked(PaneKind.scopes); }
+                    }
+                    SwitchRow {
                         kind: PaneKind.timeline;
                         current: root.kind == PaneKind.timeline;
                         chosen => { menu.close(); root.picked(PaneKind.timeline); }
@@ -435,7 +446,7 @@ export component AddPaneButton inherits Rectangle {
     property <length> menu-w: 168px;
     /// Five view rows and the surface's padding; held to the room under the
     /// button the way the seat's own menu is.
-    property <length> list-h: 6 * 26px + 8px;
+    property <length> list-h: 7 * 26px + 8px;
     property <length> menu-h: Math.min(root.list-h, Math.max(3 * 26px + 8px,
         Panes.room-below(root.absolute-position.y + root.height + 4px)));
 
@@ -510,6 +521,10 @@ export component AddPaneButton inherits Rectangle {
                     SwitchRow {
                         kind: PaneKind.claude;
                         chosen => { menu.close(); root.added(PaneKind.claude); }
+                    }
+                    SwitchRow {
+                        kind: PaneKind.scopes;
+                        chosen => { menu.close(); root.added(PaneKind.scopes); }
                     }
                     SwitchRow {
                         kind: PaneKind.timeline;

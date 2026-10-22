@@ -108,6 +108,12 @@ pub const ACTIONS: &[Action] = &[
         id: "freeze",
         defaults: &["f"],
     },
+    // A picture and its sound linked or taken apart, on Premiere's key
+    // (Royalty Studio fork).
+    Action {
+        id: "link",
+        defaults: &["ctrl+l"],
+    },
     // CapCut's Delete Left and Delete Right, on its keys: the clip under
     // the playhead loses everything before it (Q) or after it (W).
     // https://github.com/jub0t/Concat/issues/400
@@ -123,9 +129,10 @@ pub const ACTIONS: &[Action] = &[
         id: "split-tool",
         defaults: &["b"],
     },
+    // Shift+M: M marks, as in every other editor (Royalty Studio fork).
     Action {
         id: "mute",
-        defaults: &["m"],
+        defaults: &["shift+m"],
     },
     // The hand: the pan tool, on and off, the key every editor's canvas
     // grabs with.
@@ -171,6 +178,86 @@ pub const ACTIONS: &[Action] = &[
         id: "step-forward",
         defaults: &["right"],
     },
+    // The cutting room's keys, where Premiere, Resolve and Final Cut keep
+    // them (Royalty Studio fork): markers, cut to cut, J-K-L, in and out,
+    // the three-point edit, lift and extract, and the trim tools.
+    Action {
+        id: "marker",
+        defaults: &["m"],
+    },
+    Action {
+        id: "prev-edit",
+        defaults: &["up"],
+    },
+    Action {
+        id: "next-edit",
+        defaults: &["down"],
+    },
+    Action {
+        id: "prev-marker",
+        defaults: &["shift+up"],
+    },
+    Action {
+        id: "next-marker",
+        defaults: &["shift+down"],
+    },
+    Action {
+        id: "shuttle-back",
+        defaults: &["j"],
+    },
+    Action {
+        id: "shuttle-stop",
+        defaults: &["k"],
+    },
+    Action {
+        id: "shuttle-forward",
+        defaults: &["l"],
+    },
+    Action {
+        id: "mark-in",
+        defaults: &["i"],
+    },
+    Action {
+        id: "mark-out",
+        defaults: &["o"],
+    },
+    Action {
+        id: "clear-marks",
+        defaults: &["alt+x"],
+    },
+    Action {
+        id: "insert-edit",
+        defaults: &[","],
+    },
+    Action {
+        id: "overwrite-edit",
+        defaults: &["."],
+    },
+    // Semicolon is Shift+comma on a Spanish keyboard, so both.
+    Action {
+        id: "lift",
+        defaults: &[";", "shift+;"],
+    },
+    Action {
+        id: "extract",
+        defaults: &["'"],
+    },
+    Action {
+        id: "select-tool",
+        defaults: &["v"],
+    },
+    Action {
+        id: "roll-tool",
+        defaults: &["r"],
+    },
+    Action {
+        id: "slip-tool",
+        defaults: &["y"],
+    },
+    Action {
+        id: "slide-tool",
+        defaults: &["u"],
+    },
 ];
 
 /// The action a row and a dispatch speak, by its id.
@@ -201,6 +288,7 @@ pub fn name(id: &str) -> String {
         "delete" => i18n::t("common.delete"),
         "ripple-delete" => i18n::t("shortcuts.rippleDelete"),
         "freeze" => i18n::t("timelinePane.freeze"),
+        "link" => i18n::t("shortcuts.linkUnlink"),
         "delete-left" => i18n::t("shortcuts.deleteLeft"),
         "delete-right" => i18n::t("shortcuts.deleteRight"),
         "split-tool" => i18n::t("shortcuts.splitTool"),
@@ -215,6 +303,25 @@ pub fn name(id: &str) -> String {
         "end" => i18n::t("common.goToEnd"),
         "step-back" => i18n::t("shortcuts.stepBack"),
         "step-forward" => i18n::t("shortcuts.stepForward"),
+        "marker" => i18n::t("shortcuts.marker"),
+        "prev-edit" => i18n::t("shortcuts.prevEdit"),
+        "next-edit" => i18n::t("shortcuts.nextEdit"),
+        "prev-marker" => i18n::t("shortcuts.prevMarker"),
+        "next-marker" => i18n::t("shortcuts.nextMarker"),
+        "shuttle-back" => i18n::t("shortcuts.shuttleBack"),
+        "shuttle-stop" => i18n::t("shortcuts.shuttleStop"),
+        "shuttle-forward" => i18n::t("shortcuts.shuttleForward"),
+        "mark-in" => i18n::t("shortcuts.markIn"),
+        "mark-out" => i18n::t("shortcuts.markOut"),
+        "clear-marks" => i18n::t("shortcuts.clearMarks"),
+        "insert-edit" => i18n::t("shortcuts.insertEdit"),
+        "overwrite-edit" => i18n::t("shortcuts.overwriteEdit"),
+        "lift" => i18n::t("shortcuts.lift"),
+        "extract" => i18n::t("shortcuts.extract"),
+        "select-tool" => i18n::t("shortcuts.selectTool"),
+        "roll-tool" => i18n::t("shortcuts.rollTool"),
+        "slip-tool" => i18n::t("shortcuts.slipTool"),
+        "slide-tool" => i18n::t("shortcuts.slideTool"),
         _ => String::new(),
     }
 }

@@ -117,12 +117,14 @@ export component Modal inherits Rectangle {
             root.room-h - 24px);
         background: Theme.panel;
         border-width: root.fill ? 0px : 1px;
-        border-color: Theme.line-strong;
+        // A hairline and a deep soft shadow, as a Mac's sheets have,
+        // rather than a strong edge (Royalty Studio fork).
+        border-color: Theme.line;
         border-radius: root.fill ? 0px : Theme.r-xl;
         // Lifted off the editor it floats over, as the voiceover card is.
-        drop-shadow-blur: root.floating ? 24px : 0px;
-        drop-shadow-offset-y: root.floating ? 6px : 0px;
-        drop-shadow-color: root.floating ? #00000059 : Colors.transparent;
+        drop-shadow-blur: root.floating ? 32px : 0px;
+        drop-shadow-offset-y: root.floating ? 10px : 0px;
+        drop-shadow-color: root.floating ? #00000073 : Colors.transparent;
         clip: true;
 
         // Swallows presses that land on the dialog, so they do not reach the
@@ -132,7 +134,7 @@ export component Modal inherits Rectangle {
 
         body := VerticalLayout {
             Rectangle {
-                height: 42px;
+                height: 46px;
 
                 // What drags a floating card, under the title and the ×.
                 if root.floating: TouchArea {
@@ -164,7 +166,7 @@ export component Modal inherits Rectangle {
                 // centred title has matching weight either side of it rather
                 // than being pushed off true by whichever one is longer.
                 HorizontalLayout {
-                    padding-left: 14px;
+                    padding-left: 16px;
                     padding-right: 12px;
                     spacing: 8px;
 
@@ -184,11 +186,13 @@ export component Modal inherits Rectangle {
                     // the job running, to be seen again when it is opened.
                     if root.dismissable || root.floating: VerticalLayout {
                         alignment: center;
+                        // A round close, as a Mac's sheet and an iPhone's
+                        // card have it (Royalty Studio fork).
                         Rectangle {
-                            width: 26px;
-                            height: 26px;
-                            border-radius: Theme.r-sm;
-                            background: shut.has-hover ? Theme.field : Colors.transparent;
+                            width: 24px;
+                            height: 24px;
+                            border-radius: self.height / 2;
+                            background: shut.has-hover ? Theme.field-hover : Theme.field;
 
                             Icon {
                                 x: (parent.width - self.width) / 2;
@@ -284,13 +288,12 @@ export component Button inherits Rectangle {
         : root.square ? (root.large ? 34px : 28px)
         : text.preferred-width + root.mark + root.gap + (root.large ? 32px : 24px);
     max-width: root.square ? (root.large ? 34px : 28px) : 100000px;
-    border-radius: Theme.r;
+    // A pill, and a square one a circle, as a Mac's and an iPhone's
+    // buttons are; filled rather than outlined (Royalty Studio fork).
+    border-radius: self.height / 2;
     opacity: root.enabled ? 1.0 : 0.45;
-    border-width: root.ghost ? 0px : 1px;
-    border-color: root.primary ? (root.lit ? Theme.accent-hover : Theme.accent)
-        : (root.danger && root.lit) ? root.danger-edge
-        : root.lit ? Theme.line-strong
-        : Theme.line;
+    border-width: (root.danger && root.lit) ? 1px : 0px;
+    border-color: root.danger-edge;
     background: root.primary ? (root.lit ? Theme.accent-hover : Theme.accent)
         : root.ghost ? (root.lit ? Theme.field : Colors.transparent)
         : (root.danger && root.lit) ? root.danger-wash
@@ -517,7 +520,7 @@ export component DialogSection inherits VerticalLayout {
     // together were reading as a break between groups rather than as a title
     // sitting on the thing it names.
     Rectangle {
-        height: 30px;
+        height: 32px;
         background: !root.collapsible ? Colors.transparent
             : head.has-hover ? Theme.field
             : Theme.raised;
@@ -531,8 +534,8 @@ export component DialogSection inherits VerticalLayout {
         }
 
         HorizontalLayout {
-            padding-left: 14px;
-            padding-right: 14px;
+            padding-left: 16px;
+            padding-right: 16px;
             spacing: 6px;
 
             // Two chevrons swapped rather than one rotated: Slint puts
@@ -603,9 +606,9 @@ export component DialogSection inherits VerticalLayout {
                 alignment: center;
 
                 Rectangle {
-                    width: 30px;
-                    height: 17px;
-                    border-radius: Theme.r-sm;
+                    width: 32px;
+                    height: 19px;
+                    border-radius: self.height / 2;
                     background: root.on ? Theme.accent : Theme.field-active;
 
                     animate background { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
@@ -613,12 +616,15 @@ export component DialogSection inherits VerticalLayout {
                     Rectangle {
                         x: root.on ? parent.width - self.width - 2px : 2px;
                         y: (parent.height - self.height) / 2;
-                        width: 13px;
-                        height: 13px;
-                        border-radius: Theme.r-xs;
-                        background: Theme.on-accent;
+                        width: 15px;
+                        height: 15px;
+                        border-radius: self.height / 2;
+                        background: #ffffff;
+                        drop-shadow-blur: 3px;
+                        drop-shadow-offset-y: 1px;
+                        drop-shadow-color: #00000059;
 
-                        animate x { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+                        animate x { duration: 160ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
                     }
 
                     TouchArea {
@@ -647,9 +653,9 @@ export component DialogSection inherits VerticalLayout {
             y: 0;
             width: parent.width;
             height: self.preferred-height;
-            padding: 14px;
+            padding: 16px;
             padding-top: 4px;
-            spacing: 6px;
+            spacing: 8px;
             @children
         }
     }

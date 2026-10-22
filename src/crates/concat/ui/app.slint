@@ -15,6 +15,14 @@ import "../../concat-text/fonts/HankenGrotesk-Medium.ttf";
 import "../../concat-text/fonts/HankenGrotesk-SemiBold.ttf";
 import "../../concat-text/fonts/HankenGrotesk-Bold.ttf";
 import "../../concat-text/fonts/HankenGrotesk-Italic.ttf";
+// Inter carries the interface in the Royalty Studio fork: the closest open
+// face to the system one a Mac is drawn in, made for screens at small
+// sizes. Regular for body, SemiBold for titles and buttons, Bold for the
+// headings. Licensed under the SIL Open Font License; see LICENSE-Inter.txt.
+import "../../concat-text/fonts/Inter-Regular.ttf";
+import "../../concat-text/fonts/Inter-SemiBold.ttf";
+import "../../concat-text/fonts/Inter-Bold.ttf";
+import "../../concat-text/fonts/Inter-Italic.ttf";
 
 import { Theme } from "theme/theme.slint";
 import { Bezier, Curves, Fmt, Focus, Payload } from "util.slint";
@@ -29,12 +37,15 @@ import { RelinkDialog, RelinkData, MissingMediaItem } from "dialogs/relink.slint
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
+import { GenerateDialog, GenerateSheetData } from "dialogs/generate.slint";
+import { MarkerDialog, MarkerSheetData } from "dialogs/marker.slint";
 import { AvatarData } from "primitives/avatar.slint";
 import { VoiceoverData, VoiceoverPanel } from "dialogs/voiceover.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
 import { Editor } from "editor.slint";
 import { PaneKind, Panes } from "workspace/pane-switcher.slint";
 import { ChatEntry, Claude } from "workspace/claude-pane.slint";
+import { Motion, MotionField } from "inspector/motion-panel.slint";
 import { ChipOption, NewProjectDialog, RecentProjectData, StartData, StartScreen } from "start.slint";
 import { TitleBar } from "title-bar.slint";
 import { PhoneEditor } from "phone/editor.slint";
@@ -50,7 +61,7 @@ import { Workspace } from "workspace/workspace.slint";
 import {
     Backdrop, BackdropData, ClipData, ClipField, ClipKeyData, ClipKind, ClipTextField, DropData, Keyframes,
     SelectedClipData, SelectedTransitionData, StageGuideData, StageItemData, TextAlignment, TimelineTabData,
-    TimelineTool, TrackData, TrackSize,
+    TimelineTool, TimeSpan, TrackData, TrackSize, MarkerData,
 } from "timeline/model.slint";
 
 // Re-exported so main.rs can reach the globals and the struct.
@@ -64,10 +75,11 @@ export {
     Backdrop, BackdropData, ClipData, ClipField, ClipKeyData, ClipKind, ClipTextField, DropData, Keyframes,
     KeyEditor, KeyMarkData, KeyRowData,
     SelectedClipData, SelectedTransitionData, StageGuideData, StageItemData, TextAlignment, TimelineTabData,
-    TimelineTool, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
+    TimelineTool, TimeSpan, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
     ChipOption, RecentProjectData, StartData, SystemFactData, ToastData, ProjectSheetData,
-    CaptionsSheetData, SpeechSheetData, VoiceoverData, SoundCardData, Sounds, VoiceCardData,
+    CaptionsSheetData, SpeechSheetData, GenerateSheetData, MarkerSheetData, MarkerData, VoiceoverData, SoundCardData, Sounds, VoiceCardData,
     ChatEntry, Claude,
+    Motion, MotionField,
 }
 
 export component App inherits Window {
@@ -121,7 +133,8 @@ export component App inherits Window {
         }
     }
     property <bool> sheet-open: root.export.open || root.settings.open
-        || root.project-sheet.open || root.captions.open || root.speech.open
+        || root.project-sheet.open || root.captions.open || root.speech.open || root.generate.open
+        || root.marker-sheet.open
         || root.start.composing;
     changed sheet-open => {
         if (!root.sheet-open) {
@@ -164,6 +177,7 @@ export component App inherits Window {
     callback start-open-recent(path: string);
     callback start-forget-recent(path: string);
     callback start-reveal-recent(path: string);
+    callback start-trash-recent(path: string);
     callback start-search-edited(query: string);
     callback start-sort-changed(sort: int);
     /// One of the launch screen's links, by name; see `start::link`.
@@ -271,6 +285,10 @@ export component App inherits Window {
     callback settings-proxies-changed(on: bool);
     callback settings-gpu-changed(on: bool);
     callback settings-magnetic-changed(on: bool);
+    callback settings-split-audio-changed(on: bool);
+    callback settings-linked-selection-changed(on: bool);
+    callback settings-autosave-changed(on: bool);
+    callback settings-assistant-edited(field: string, text: string);
     callback settings-download-source-changed(index: int);
     callback settings-download-base-edited(text: string);
     callback settings-server-enabled-changed(on: bool);
@@ -324,6 +342,9 @@ export component App inherits Window {
     callback captions-cancel();
     callback captions-import-srt();
     callback captions-export-srt();
+    callback captions-words-toggled(on: bool);
+    callback captions-pause-rule-changed(which: int, seconds: float);
+    callback captions-cut-pauses();
 
     in property <SpeechSheetData> speech;
     in property <[string]> speech-models;
@@ -355,6 +376,20 @@ export component App inherits Window {
     callback speech-pick-picture();
     callback speech-save-voice();
     callback speech-clear-style();
+    /// The Generate with AI sheet (Royalty Studio fork).
+    in property <GenerateSheetData> generate;
+    callback generate-closed();
+    callback generate-prompt-edited(text: string);
+    callback generate-changed(field: string, value: int);
+    callback generate-begin();
+    callback generate-cancel();
+    callback generate-open-settings();
+    /// The marker sheet (Royalty Studio fork).
+    in property <MarkerSheetData> marker-sheet;
+    callback marker-sheet-closed();
+    callback marker-sheet-name-edited(text: string);
+    callback marker-sheet-color(index: int);
+    callback marker-sheet-deleted();
 
     /// The voiceover panel; see VoiceoverPanel. Its meter and clock come
     /// on the Editor global, from a timer.
@@ -510,6 +545,7 @@ export component App inherits Window {
                 if (root.confirm.open) { root.confirm-dismissed(); return accept; }
                 if (root.relink.open) { root.relink-dismiss(); return accept; }
                 if (root.project-sheet.open) { root.project-closed(); return accept; }
+                if (root.marker-sheet.open) { root.marker-sheet-closed(); return accept; }
                 if (root.settings.open) { root.settings-closed(); return accept; }
                 if (root.export.open) {
                     if (root.export.phase != ExportPhase.running) { root.export-closed(); }
@@ -523,6 +559,10 @@ export component App inherits Window {
                 // A floating card closes with its job running, which goes
                 // on and is there again when it is opened; a phone's sheet
                 // busy with a job keeps itself, as its × is gone.
+                if (root.generate.open && (root.front-tool == "generate" || (!root.captions.open && !root.speech.open))) {
+                    root.generate-closed();
+                    return accept;
+                }
                 if (root.speech.open && (root.front-tool == "speech" || !root.captions.open)) {
                     if (!root.sheets-fill || !root.speech.running) { root.speech-closed(); }
                     return accept;
@@ -603,6 +643,7 @@ export component App inherits Window {
                 open-recent(path) => { root.start-open-recent(path); }
                 forget-recent(path) => { root.start-forget-recent(path); }
                 reveal-recent(path) => { root.start-reveal-recent(path); }
+                trash-recent(path) => { root.start-trash-recent(path); }
                 search-edited(query) => { root.start-search-edited(query); }
                 sort-changed(sort) => { root.start-sort-changed(sort); }
                 link(name) => { root.start-link(name); }
@@ -703,6 +744,9 @@ export component App inherits Window {
             cancel => { root.captions-cancel(); }
             import-srt => { root.captions-import-srt(); }
             export-srt => { root.captions-export-srt(); }
+            words-toggled(on) => { root.captions-words-toggled(on); }
+            pause-rule-changed(which, seconds) => { root.captions-pause-rule-changed(which, seconds); }
+            cut-pauses => { root.captions-cut-pauses(); }
         }
 
         SpeechDialog {
@@ -749,6 +793,31 @@ export component App inherits Window {
             pick-picture => { root.speech-pick-picture(); }
             save-voice => { root.speech-save-voice(); }
             clear-style => { root.speech-clear-style(); }
+        }
+
+        GenerateDialog {
+            fill: root.sheets-fill;
+            floating: !root.sheets-fill;
+            home-right: 72px;
+            home-top: 104px;
+            z: root.front-tool == "generate" ? 1 : 0;
+            raised => { root.front-tool = "generate"; }
+            inset-top: root.safe-area-insets.top;
+            inset-bottom: root.safe-area-insets.bottom;
+            inset-left: root.safe-area-insets.left;
+            inset-right: root.safe-area-insets.right;
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.height;
+            data: root.generate;
+
+            closed => { root.generate-closed(); }
+            prompt-edited(text) => { root.generate-prompt-edited(text); }
+            changed(field, value) => { root.generate-changed(field, value); }
+            begin => { root.generate-begin(); }
+            cancel => { root.generate-cancel(); }
+            open-settings => { root.generate-open-settings(); }
         }
     }
 
@@ -863,6 +932,10 @@ export component App inherits Window {
         proxies-changed(on) => { root.settings-proxies-changed(on); }
         gpu-changed(on) => { root.settings-gpu-changed(on); }
         magnetic-changed(on) => { root.settings-magnetic-changed(on); }
+        split-audio-changed(on) => { root.settings-split-audio-changed(on); }
+        linked-selection-changed(on) => { root.settings-linked-selection-changed(on); }
+        autosave-changed(on) => { root.settings-autosave-changed(on); }
+        assistant-edited(field, text) => { root.settings-assistant-edited(field, text); }
         download-source-changed(index) => { root.settings-download-source-changed(index); }
         download-base-edited(text) => { root.settings-download-base-edited(text); }
         server-enabled-changed(on) => { root.settings-server-enabled-changed(on); }
@@ -908,6 +981,23 @@ export component App inherits Window {
         apply => { root.project-apply(); }
     }
 
+    MarkerDialog {
+        fill: root.sheets-fill;
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        data: root.marker-sheet;
+        closed => { root.marker-sheet-closed(); }
+        name-edited(text) => { root.marker-sheet-name-edited(text); }
+        color-chosen(index) => { root.marker-sheet-color(index); }
+        deleted => { root.marker-sheet-deleted(); }
+    }
+
     RelinkDialog {
         fill: root.sheets-fill;
         inset-top: root.safe-area-insets.top;
@@ -924,6 +1014,7 @@ export component App inherits Window {
     in property <ConfirmData> confirm;
     callback confirm-accepted();
     callback confirm-dismissed();
+    callback confirm-chosen();
 
     ConfirmDialog {
         inset-top: root.safe-area-insets.top;
@@ -937,6 +1028,7 @@ export component App inherits Window {
         data: root.confirm;
         confirmed => { root.confirm-accepted(); }
         dismissed => { root.confirm-dismissed(); }
+        chosen => { root.confirm-chosen(); }
     }
 
 

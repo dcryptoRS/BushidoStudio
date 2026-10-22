@@ -751,9 +751,9 @@ export component PhoneEditor inherits Rectangle {
                 hovered(seconds) => { Editor.hovered(seconds); }
                 hover-ended => { Editor.hover-ended(); }
                 floor-pressed => { Editor.blur(); }
-                clip-pressed(id, additive, edge) => {
+                clip-pressed(id, additive, edge, alone) => {
                     Editor.blur();
-                    Editor.clip-pressed(id, additive, edge);
+                    Editor.clip-pressed(id, additive, edge, alone);
                 }
                 clip-dragged(seconds, pixels) => { Editor.clip-dragged(seconds, pixels); }
                 clip-released => { Editor.clip-released(); }
@@ -763,7 +763,7 @@ export component PhoneEditor inherits Rectangle {
                     Editor.band-selected(a, b, c, d, additive);
                 }
                 scrolled(seconds) => { Editor.scrolled(seconds); }
-                track-scrolled(pixels) => {
+                track-scrolled(pixels, y) => {
                     stack.track-scroll = Math.max(0px,
                         Math.min(stack.overflow, stack.at + pixels));
                 }

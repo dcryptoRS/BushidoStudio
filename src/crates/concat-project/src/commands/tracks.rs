@@ -18,12 +18,15 @@ pub(super) fn apply(
         Command::AddTrack { bottom } => {
             let timeline = project.active_mut();
             let id = mint.next("t");
-            let track = Track {
-                id: id.clone(),
-                visible: true,
-                muted: false,
-                extra: Default::default(),
+            // On lanes with kinds, a lane on top is a picture lane and one
+            // at the bottom a sound lane: each goes on the far side of its
+            // kind from the line between them, as Premiere adds V3 and A3.
+            let kind = match (timeline.is_typed(), bottom) {
+                (false, _) => TrackKind::Any,
+                (true, false) => TrackKind::Video,
+                (true, true) => TrackKind::Audio,
             };
+            let track = Track::of_kind(id.clone(), kind);
             // The stack is stored bottom first: the last track is the lane
             // drawn on top.
             if bottom {

@@ -971,9 +971,12 @@ fn supervise_stream(
                 // stream was built on (headphones unplugged, output switched
                 // in system settings).
                 let failed = stream.failed;
+                let retired = stream.retired;
                 let _stream = stream.stream;
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(1000));
+                    // The clip sets the callback let go of, freed here.
+                    while retired.try_recv().is_ok() {}
                     if failed.load(Ordering::Relaxed) {
                         report(
                             events.as_ref(),
@@ -1034,7 +1037,16 @@ fn supervise_stream(
 struct BuiltStream {
     stream: cpal::Stream,
     failed: Arc<AtomicBool>,
+    /// The clip sets the callback has replaced, for the supervisor to drop:
+    /// the last hold on a clip's sound can be the callback's, and freeing a
+    /// mapped span is a system call the real-time thread must not make.
+    retired: mpsc::Receiver<Vec<ActiveClip>>,
 }
+
+/// How many replaced clip sets wait for the supervisor's next look, a
+/// second apart; a drag replaces the set once a frame. Past that, one is
+/// dropped where it is, as every one was before.
+const RETIRED_HELD: usize = 256;
 
 /// Builds and starts one output stream on `device`, seeded with the current
 /// clip set and clock so a rebuild resumes where the last stream stopped.
@@ -1092,6 +1104,7 @@ where
     let failed = Arc::new(AtomicBool::new(false));
     let rx = Arc::clone(rx);
     let shared = Arc::clone(shared);
+    let (retire, retired) = mpsc::sync_channel::<Vec<ActiveClip>>(RETIRED_HELD);
 
     let stream = device
         .build_output_stream(
@@ -1104,7 +1117,12 @@ where
                 if let Ok(receiver) = rx.try_lock() {
                     while let Ok(message) = receiver.try_recv() {
                         match message {
-                            Msg::SetClips(next) => clips = next,
+                            Msg::SetClips(next) => {
+                                let old = std::mem::replace(&mut clips, next);
+                                // A full queue hands the set back, and it
+                                // drops here after all.
+                                let _ = retire.try_send(old);
+                            }
                             Msg::Play(at) => {
                                 position = at;
                                 playing = true;
@@ -1169,9 +1187,12 @@ where
                     loudest_right = loudest_right.max(right.abs());
                     // Hard limit. A mix of boosted clips can exceed full
                     // scale; wrapping would be far worse than flattening.
-                    frame[0] = T::from_sample(left.clamp(-1.0, 1.0));
                     if channels > 1 {
+                        frame[0] = T::from_sample(left.clamp(-1.0, 1.0));
                         frame[1] = T::from_sample(right.clamp(-1.0, 1.0));
+                    } else {
+                        // One speaker: both sides in it, not the left alone.
+                        frame[0] = T::from_sample((0.5 * (left + right)).clamp(-1.0, 1.0));
                     }
                     for extra in frame.iter_mut().skip(2) {
                         *extra = T::from_sample(0.0);
@@ -1212,7 +1233,11 @@ where
         .play()
         .map_err(|error| format!("could not start the output stream: {error}"))?;
 
-    Ok(BuiltStream { stream, failed })
+    Ok(BuiltStream {
+        stream,
+        failed,
+        retired,
+    })
 }
 
 #[cfg(test)]

@@ -280,6 +280,11 @@ pub struct TranscribeRequest {
     pub window: f64,
     /// Which model to use, e.g. "base.en".
     pub model_id: String,
+    /// One segment per word, each with the times it was heard (Royalty
+    /// Studio fork): what cutting the pauses and word-by-word captions are
+    /// made from. Off, a segment is a phrase, as captions always were.
+    #[serde(default)]
+    pub words: bool,
 }
 
 struct LoadedModel {
@@ -495,6 +500,13 @@ impl Transcriber {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_suppress_blank(true);
+        // Word by word: whisper times each token, and a segment of at most
+        // one word, split on word boundaries, is one word with its times.
+        if request.words {
+            params.set_token_timestamps(true);
+            params.set_max_len(1);
+            params.set_split_on_word(true);
+        }
         // The raw hooks, not `set_abort_callback_safe`. whisper-rs 0.16's
         // safe one hands whisper a pointer to a boxed trait object with a
         // trampoline typed for the closure itself, so whisper reads the
@@ -637,6 +649,7 @@ mod real_audio {
             source_start: 0.0,
             window: 30.0,
             model_id: "tiny.en".to_owned(),
+            words: false,
         };
         let segments = transcriber
             .transcribe(&dirs, &request, |stage| eprintln!("{stage:?}"))

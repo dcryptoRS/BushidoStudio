@@ -259,6 +259,18 @@ pub fn download(
     let remaining = response
         .header("Content-Length")
         .and_then(|value| value.parse::<u64>().ok());
+    // A mirror or a hand-set base that streams without end would fill the
+    // disk before the digest check ever ran (audit 2026-10-15, L15).
+    let ceiling = ceiling(estimate);
+    if let Some(rest) = remaining
+        && (if resumed { already } else { 0 }).saturating_add(rest) > ceiling
+    {
+        return Err(format!(
+            "{url} offers {} MB where about {} MB was expected",
+            rest / 1_000_000,
+            estimate / 1_000_000
+        ));
+    }
     let (mut received, total) = if resumed {
         (
             already,
@@ -292,6 +304,15 @@ pub fn download(
         file.write_all(&buffer[..read])
             .map_err(|error| format!("could not write {}: {error}", partial.display()))?;
         received += read as u64;
+        if received > ceiling {
+            // The partial is no use to the next source either.
+            drop(file);
+            let _ = std::fs::remove_file(partial);
+            return Err(format!(
+                "{url} sent more than {} MB, past what the file can be",
+                ceiling / 1_000_000
+            ));
+        }
         // Every 2 MB, not every chunk: a progress bar cannot use more.
         if received - reported >= 2 * 1024 * 1024 {
             reported = received;
@@ -304,6 +325,18 @@ pub fn download(
         return Err(format!("{url} came back empty"));
     }
     Ok((received, received.max(total)))
+}
+
+/// The most a download may run to: twice its table size, and never less
+/// than 64 MB over it, so a table that is a little out of date still
+/// fetches; no limit where the table gives no size.
+fn ceiling(estimate: u64) -> u64 {
+    if estimate == 0 {
+        return u64::MAX;
+    }
+    estimate
+        .saturating_mul(2)
+        .max(estimate.saturating_add(64 * 1024 * 1024))
 }
 
 /// Checks a finished download against the digest the table carries.
@@ -363,6 +396,14 @@ fn sha256(file: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_download_may_run_a_little_over_its_table_size_but_not_on_forever() {
+        // Small files get the 64 MB of slack, large ones twice their size.
+        assert_eq!(ceiling(1_000_000), 1_000_000 + 64 * 1024 * 1024);
+        assert_eq!(ceiling(500_000_000), 1_000_000_000);
+        assert_eq!(ceiling(0), u64::MAX);
+    }
 
     #[test]
     fn the_mirror_comes_before_upstream() {

@@ -850,13 +850,20 @@ component DropTile inherits Rectangle {
 component PosterAction inherits Rectangle {
     in property <Glyph> glyph;
     in property <string> label;
+    /// Armed: the next click does something that is not a click away from
+    /// undone (Royalty Studio fork: Move to Trash).
+    in property <bool> danger;
 
     callback clicked();
+    /// The pointer came onto it or left it - for the card under it, which
+    /// would otherwise take that for the pointer leaving the card and hide
+    /// the very button being pointed at.
+    callback hovered(on: bool);
 
     width: 28px;
     height: 28px;
     border-radius: self.width / 2;
-    background: touch.has-hover ? Theme.on-scrim.with-alpha(0.24) : Theme.scrim;
+    background: root.danger ? Theme.danger : touch.has-hover ? Theme.on-scrim.with-alpha(0.24) : Theme.scrim;
     accessible-role: button;
     accessible-label: root.label;
     accessible-action-default => { root.clicked(); }
@@ -875,6 +882,7 @@ component PosterAction inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        changed has-hover => { root.hovered(self.has-hover); }
     }
 
     Tip {
@@ -898,9 +906,24 @@ component PosterCard inherits Pressable {
     callback opened();
     callback forgotten();
     callback revealed();
+    /// The folder to the Trash (Royalty Studio fork), on a second click.
+    callback trashed();
 
     property <length> inset: 6px;
-    property <bool> actions: root.touchy || root.lit || root.ring || root.project.missing;
+    /// The bin has been pressed once; a second press in the next three
+    /// seconds moves the project to the Trash, and then it disarms.
+    property <bool> arming;
+    Timer {
+        interval: 3s;
+        running: root.arming;
+        triggered => { root.arming = false; }
+    }
+    /// The pointer is on one of the actions. The actions are drawn over the
+    /// card's touch area, so there the card no longer counts as hovered; this
+    /// keeps them up rather than letting them vanish under the pointer, come
+    /// back as the card is hovered again, and flicker (Royalty Studio fork).
+    property <bool> on-action;
+    property <bool> actions: root.touchy || root.lit || root.on-action || root.ring || root.project.missing;
 
     label: root.project.name;
     clicked => { root.opened(); }
@@ -980,23 +1003,48 @@ component PosterCard inherits Pressable {
             }
         }
 
-        if root.actions: HorizontalLayout {
+        // Always there, dimmed until the card is pointed at (Royalty Studio
+        // fork). Made and unmade by hover, they flickered: the pointer on a
+        // button is off the card's touch area, so the card unmade them, the
+        // pointer was on the card again, it made them... and a click landed
+        // on the card and opened the project. A fade changes nothing under
+        // the pointer, so a click always reaches the button.
+        HorizontalLayout {
             x: parent.width - self.preferred-width - 8px;
             y: 8px;
             height: 28px;
             width: self.preferred-width;
             spacing: 6px;
+            opacity: root.actions ? 1.0 : 0.5;
+            animate opacity { duration: 120ms; }
 
             if root.can-reveal && !root.project.missing: PosterAction {
                 glyph: Glyph.folder;
                 label: I18n.t("start.showInFolder");
                 clicked => { root.revealed(); }
+                hovered(on) => { root.on-action = on; }
             }
 
             PosterAction {
                 glyph: Glyph.close;
                 label: I18n.t("start.removeFromList");
                 clicked => { root.forgotten(); }
+                hovered(on) => { root.on-action = on; }
+            }
+
+            if root.can-reveal && !root.project.missing: PosterAction {
+                glyph: Glyph.trash;
+                danger: root.arming;
+                label: root.arming ? I18n.t("start.confirmTrash") : I18n.t("start.moveToTrash");
+                clicked => {
+                    if (root.arming) {
+                        root.arming = false;
+                        root.trashed();
+                    } else {
+                        root.arming = true;
+                    }
+                }
+                hovered(on) => { root.on-action = on; }
             }
         }
     }
@@ -1043,6 +1091,7 @@ component ProjectsGrid inherits Rectangle {
     callback opened(path: string);
     callback forgotten(path: string);
     callback revealed(path: string);
+    callback trashed(path: string);
 
     property <length> gap: 16px;
     property <length> min-card: 220px;
@@ -1067,6 +1116,7 @@ component ProjectsGrid inherits Rectangle {
         opened => { root.opened(project.path); }
         forgotten => { root.forgotten(project.path); }
         revealed => { root.revealed(project.path); }
+        trashed => { root.trashed(project.path); }
     }
 }
 
@@ -1611,6 +1661,7 @@ component WideHome inherits Rectangle {
     callback open-recent(path: string);
     callback forget-recent(path: string);
     callback reveal-recent(path: string);
+    callback trash-recent(path: string);
     callback search-edited(query: string);
     callback sort-changed(sort: int);
     callback link(name: string);
@@ -1769,6 +1820,7 @@ component WideHome inherits Rectangle {
                     opened(path) => { root.open-recent(path); }
                     forgotten(path) => { root.forget-recent(path); }
                     revealed(path) => { root.reveal-recent(path); }
+                    trashed(path) => { root.trash-recent(path); }
                 }
 
                 // ── learn, under the projects ────────────────────────
@@ -2075,6 +2127,7 @@ export component StartScreen inherits Rectangle {
     callback open-recent(path: string);
     callback forget-recent(path: string);
     callback reveal-recent(path: string);
+    callback trash-recent(path: string);
     callback open-settings();
     callback search-edited(query: string);
     callback sort-changed(sort: int);
@@ -2101,6 +2154,7 @@ export component StartScreen inherits Rectangle {
         open-recent(path) => { root.open-recent(path); }
         forget-recent(path) => { root.forget-recent(path); }
         reveal-recent(path) => { root.reveal-recent(path); }
+        trash-recent(path) => { root.trash-recent(path); }
         search-edited(query) => { root.search-edited(query); }
         sort-changed(sort) => { root.sort-changed(sort); }
         link(name) => { root.link(name); }
@@ -2409,6 +2463,10 @@ export component NewProjectDialog inherits Modal {
                     Select {
                         width: 168px;
                         options: root.data.rate-options;
+                        // A pick sets the control's own value, cutting this binding: this
+                        // follows the data and puts it back (audit 2026-10-12, #8).
+                        property <int> wanted: root.data.rate;
+                        changed wanted => { self.current = self.wanted; }
                         current: root.data.rate;
                         enabled: !root.data.busy;
                         changed(index) => { root.rate-changed(index); }

@@ -88,6 +88,10 @@ ort = { workspace = true, optional = true, features = ["directml"] }
 
 [features]
 chatterbox = ["dep:ort", "dep:tokenizers", "dep:concat-vision"]
+# Whisper on an NVIDIA card (Royalty Studio fork): ggml's CUDA backend,
+# built by nvcc and linked against the CUDA runtime and cuBLAS. Needs the
+# CUDA toolkit to build; CMAKE_CUDA_ARCHITECTURES picks the cards.
+cuda = ["whisper-rs/cuda"]
 
 [lints]
 workspace = true

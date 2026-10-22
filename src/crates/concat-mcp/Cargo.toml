@@ -18,6 +18,14 @@ serde_json.workspace = true
 # hardware and the user's own looks in the catalogue (Royalty Studio fork).
 concat-media.workspace = true
 concat-effects.workspace = true
+# media_generate: the generating services, the keys the window keeps and
+# the media item the result is added as (Royalty Studio fork). Already in
+# the tree through concat-api.
+concat-host.workspace = true
+concat-project.workspace = true
+# frame_levels: the preview frame's PNG read back into numbers.
+base64 = "0.22"
+png = "0.17"
 
 [dev-dependencies]
 tempfile = "3"

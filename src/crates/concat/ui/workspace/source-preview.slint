@@ -7,6 +7,9 @@
 export global SourcePreview {
     in property <bool> open;
     in property <string> name;
+    /// Its in and out points as the chip says them, or empty (Royalty
+    /// Studio fork).
+    in property <string> marks;
     /// The card's row, or -1.
     in property <int> row: -1;
     /// The Audio page's card playing, or empty for a file in the bin.

@@ -71,11 +71,23 @@ pub enum Picture {
     Pixels(Vec<u8>, u32, u32),
 }
 
+/// The scopes of the last frame drawn, as the Scopes pane shows them
+/// (Royalty Studio fork).
+#[derive(Default, Clone)]
+pub struct ScopeShots {
+    pub waveform: slint::Image,
+    pub parade: slint::Image,
+    pub vectorscope: slint::Image,
+    pub histogram: slint::Image,
+}
+
 /// The monitor's state.
 #[derive(Default)]
 pub struct MonitorPane {
     /// The last frame drawn.
     pub image: slint::Image,
+    /// Its scopes, once a frame has been measured with the Scopes pane out.
+    pub scopes: Option<ScopeShots>,
     busy: bool,
     wanted: bool,
     /// Said once per project: a monitor that cannot decode says so, and
@@ -164,6 +176,7 @@ impl MonitorPane {
                         .monitor
                         .texture_of(&sources, spec)
                         .and_then(|texture| {
+                            self.measure(studio, &texture);
                             slint::Image::try_from(texture)
                                 .map_err(|error| format!("preview texture: {error}"))
                         }),
@@ -196,7 +209,41 @@ impl MonitorPane {
                 self.request(studio);
             }
             MonitorMsg::Opened => self.failed = false,
-            MonitorMsg::Closed => self.image = slint::Image::default(),
+            MonitorMsg::Closed => {
+                self.image = slint::Image::default();
+                self.scopes = None;
+            }
+        }
+    }
+
+    /// The scopes the Scopes pane shows, of the frame just drawn, on the
+    /// GPU and the thread the frame was drawn on; nothing while no Scopes
+    /// pane is out.
+    fn measure(&mut self, studio: &Studio, frame: &concat_host::preview::wgpu::Texture) {
+        let wanted = studio.scope_mask();
+        if wanted == 0 {
+            return;
+        }
+        match studio.host.monitor.scopes_of(frame, wanted) {
+            Ok(images) => {
+                let mut shots = self.scopes.take().unwrap_or_default();
+                let keep = |texture: Option<concat_host::preview::wgpu::Texture>,
+                            slot: &mut slint::Image| {
+                    match texture.map(slint::Image::try_from) {
+                        Some(Ok(image)) => *slot = image,
+                        Some(Err(error)) => {
+                            log::warn!("scopes: the window would not take one: {error}")
+                        }
+                        None => {}
+                    }
+                };
+                keep(images.waveform, &mut shots.waveform);
+                keep(images.parade, &mut shots.parade);
+                keep(images.vectorscope, &mut shots.vectorscope);
+                keep(images.histogram, &mut shots.histogram);
+                self.scopes = Some(shots);
+            }
+            Err(error) => log::warn!("scopes: {error}"),
         }
     }
 

@@ -24,12 +24,17 @@ pub(super) fn apply(
                     .iter()
                     .map(|timeline| timeline.name.clone()),
             );
-            let tracks = (1..=4)
-                .map(|_| Track {
-                    id: mint.next("t"),
-                    visible: true,
-                    muted: false,
-                    extra: Default::default(),
+            // Two sound lanes under two picture lanes when the timeline you
+            // were looking at has lanes with kinds; four of any kind when not.
+            let typed = project.active().is_typed();
+            let tracks = (0..4)
+                .map(|row| {
+                    let kind = match (typed, row < 2) {
+                        (false, _) => TrackKind::Any,
+                        (true, true) => TrackKind::Audio,
+                        (true, false) => TrackKind::Video,
+                    };
+                    Track::of_kind(mint.next("t"), kind)
                 })
                 .collect();
             // Born at the frame of the timeline you were looking at: the
@@ -46,6 +51,7 @@ pub(super) fn apply(
                 background,
                 tracks,
                 clips: Vec::new(),
+                markers: Vec::new(),
                 extra: Default::default(),
             }));
             project.active_timeline_id = id.clone();

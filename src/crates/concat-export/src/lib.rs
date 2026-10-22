@@ -246,6 +246,11 @@ pub struct ExportClip {
     /// black and for every other clip. See `Timeline::background_of`.
     #[serde(default)]
     pub backdrop: Option<ExportBackdrop>,
+    /// The document's `Clip::link` (Royalty Studio fork): the sound linked
+    /// to a picture follows the picture across a transition's overlap, as
+    /// the sound inside it would.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
 
 /// A clip's background, resolved for drawing: the document's
@@ -342,6 +347,7 @@ impl ExportClip {
             highlighted: false,
             reveal_map: None,
             backdrop: None,
+            link: None,
         }
     }
 }
@@ -590,11 +596,16 @@ pub(crate) fn transitions_at(shapes: &[TransitionShape], frame: i64) -> Vec<Tran
 /// for the compositor to combine over; every other kind needs nothing more
 /// than what it already baked into the clips themselves.
 ///
-/// Track indices are doubled first, so an incoming clip gets an odd lane of
-/// its own directly above the pair it crosses over - stacking against every
-/// other track is preserved, and nothing else occupies odd lanes. Cuts are
-/// collected before anything mutates, so resolving one transition cannot
-/// unhook the adjacency test of the next.
+/// Track indices are multiplied first, so an incoming clip gets a lane of
+/// its own directly above the one it crosses from - stacking against every
+/// other track is preserved, and nothing else occupies those lanes. By two
+/// when no transition follows another, as it always was; by the longest
+/// chain's length plus one when one does, so that in A into B into C, C sits
+/// above B and still below the next track - with two lanes a track, C
+/// climbed into the track above and hid what was there (audit 2026-10-15,
+/// N2). Cuts are collected before anything mutates, so resolving one
+/// transition cannot unhook the adjacency test of the next, and resolved in
+/// the order they play, so each link is placed above the one before it.
 ///
 /// Every kind but the fades to a colour is built on one overlap, centred on
 /// the cut the way the timeline draws it: the incoming clip extends
@@ -618,14 +629,22 @@ fn resolve_transitions(clips: &mut Vec<ExportClip>, rate: FrameRate) -> Vec<Tran
     resolve_transitions_at(clips, rate, 0.0)
 }
 
+/// The clips as the file will sound them: transitions resolved, so each
+/// side of a cut fades across it and the outgoing clip plays on past its
+/// out-point. The window plays its sound from these, so a cross-fade is
+/// heard while editing as it will be in the file, where it played a hard
+/// cut (audit 2026-10-15, M8). The pictures are moved too - lanes, held
+/// frames - which the sound does not read.
+pub fn as_heard(mut clips: Vec<ExportClip>, rate: FrameRate) -> Vec<ExportClip> {
+    resolve_transitions(&mut clips, rate);
+    clips
+}
+
 fn resolve_transitions_at(
     clips: &mut Vec<ExportClip>,
     rate: FrameRate,
     origin: f64,
 ) -> Vec<TransitionSpan> {
-    for clip in clips.iter_mut() {
-        clip.track *= 2;
-    }
     let mut spans: Vec<TransitionSpan> = Vec::new();
 
     let fps = rate.fps().as_f64();
@@ -657,6 +676,18 @@ fn resolve_transitions_at(
             }),
             _ => {}
         }
+    }
+
+    // How many lanes a track needs: one per link of its longest chain of
+    // transitions, and two at the least.
+    cuts.sort_by(|a, b| clips[a.incoming].start.total_cmp(&clips[b.incoming].start));
+    let mut depth = vec![0usize; clips.len()];
+    for cut in &cuts {
+        depth[cut.incoming] = depth[cut.outgoing] + 1;
+    }
+    let lanes = depth.iter().copied().max().unwrap_or(0).max(1) + 1;
+    for clip in clips.iter_mut() {
+        clip.track *= lanes;
     }
 
     for cut in cuts {
@@ -873,6 +904,30 @@ fn overlap(clips: &mut Vec<ExportClip>, cut: &Cut, frame: f64) -> Option<Overlap
     let a_track = a.track;
     let a_end = a.start + a.duration;
     let outgoing_runs = tail_handle(a, frame) + frame / 2.0 >= tail;
+    // The sound on clips of their own linked to the two pictures, where it
+    // meets the cut as the pictures do: it is lengthened and faded as the
+    // sound inside them would be (Royalty Studio fork).
+    let sound_of = |picture: &ExportClip, at_start: bool| -> Vec<usize> {
+        let Some(link) = picture.link.as_deref() else {
+            return Vec::new();
+        };
+        clips
+            .iter()
+            .enumerate()
+            .filter(|(_, sound)| {
+                sound.kind == ClipKind::Audio
+                    && sound.link.as_deref() == Some(link)
+                    && if at_start {
+                        (sound.start - picture.start).abs() < frame / 2.0
+                    } else {
+                        (sound.start + sound.duration - a_end).abs() < frame / 2.0
+                    }
+            })
+            .map(|(index, _)| index)
+            .collect()
+    };
+    let incoming_sound = sound_of(b, true);
+    let outgoing_sound = sound_of(a, false);
 
     {
         let b = &mut clips[cut.incoming];
@@ -881,6 +936,18 @@ fn overlap(clips: &mut Vec<ExportClip>, cut: &Cut, frame: f64) -> Option<Overlap
         // rather than arriving or leaving at full level.
         b.fade_in = b.fade_in.max(length);
         b.track = a_track + 1;
+    }
+    for index in incoming_sound {
+        let sound = &mut clips[index];
+        extend(sound, lead, 0.0);
+        sound.fade_in = sound.fade_in.max(length);
+    }
+    if outgoing_runs {
+        for index in outgoing_sound {
+            let sound = &mut clips[index];
+            extend(sound, 0.0, tail);
+            sound.fade_out = sound.fade_out.max(length);
+        }
     }
     if outgoing_runs {
         let a = &mut clips[cut.outgoing];
@@ -1197,7 +1264,12 @@ pub fn render_on(
             reporter.cancelled()?;
             reporter.emit(0, total_frames, "mixing audio");
             let mix: Vec<AudioClip> = sound.iter().flat_map(|clip| audio_pieces(clip)).collect();
-            audio::mix_to_file(&mix, timeline_end, &mixed).map_err(|error| error.to_string())?;
+            audio::mix_to_file_until(&mix, timeline_end, &mixed, reporter.cancel).map_err(
+                |error| match error {
+                    concat_media::Error::Cancelled => "export cancelled".to_owned(),
+                    error => error.to_string(),
+                },
+            )?;
 
             reporter.cancelled()?;
             reporter.emit(total_frames, total_frames, "muxing");
@@ -2929,6 +3001,7 @@ mod tests {
                     has_audio: false,
                     audio_tracks: Vec::new(),
                     origin: None,
+                    motion: None,
                     color_space: Default::default(),
                 },
             })
@@ -3283,6 +3356,60 @@ mod tests {
         ];
         clips[0].media_duration = Some(10.0);
         clips
+    }
+
+    /// A into B into C on one track, a title on the track above over C: each
+    /// incoming clip sits a lane above the one it crosses from, and the
+    /// whole chain stays below the title's track (audit 2026-10-15, N2).
+    #[test]
+    fn a_chain_of_transitions_stays_on_its_own_track() {
+        let mut clips = vec![
+            clip("video", 0, 0.0, 4.0, 0.0),
+            clip("video", 0, 4.0, 4.0, 2.0),
+            clip("video", 0, 8.0, 4.0, 2.0),
+            clip("text", 1, 6.0, 6.0, 0.0),
+        ];
+        clips[0].media_duration = Some(10.0);
+        clips[1].media_duration = Some(10.0);
+        clips[2].media_duration = Some(10.0);
+        clips[1].transition = spec("cross-fade", 1.0);
+        clips[2].transition = spec("cross-fade", 1.0);
+        resolve_transitions(&mut clips, FrameRate::THIRTY);
+        let (a, b, c, title) = (
+            clips[0].track,
+            clips[1].track,
+            clips[2].track,
+            clips[3].track,
+        );
+        assert_eq!(b, a + 1, "B over A");
+        assert_eq!(c, b + 1, "C over B");
+        assert!(c < title, "C stays below the track above: {c} < {title}");
+    }
+
+    #[test]
+    fn the_sound_linked_to_each_picture_crossfades_as_the_sound_inside_would() {
+        let mut clips = cut_with_handles();
+        for (index, link) in [(0, "l1"), (1, "l2")] {
+            clips[index].muted = true;
+            clips[index].link = Some(link.to_owned());
+            let mut sound = clips[index].clone();
+            sound.kind = ClipKind::Audio;
+            sound.muted = false;
+            sound.track = 5;
+            clips.push(sound);
+        }
+        clips[1].transition = spec("cross-fade", 1.0);
+        resolve_transitions(&mut clips, FrameRate::THIRTY);
+        let (picture_in, sound_in) = (&clips[1], &clips[3]);
+        assert_eq!(sound_in.start, picture_in.start, "starts with its picture");
+        assert_eq!(sound_in.source_start, picture_in.source_start);
+        assert_eq!(sound_in.fade_in, 1.0, "fades in across the overlap");
+        let (picture_out, sound_out) = (&clips[0], &clips[2]);
+        assert_eq!(
+            sound_out.duration, picture_out.duration,
+            "runs on with its picture"
+        );
+        assert_eq!(sound_out.fade_out, 1.0);
     }
 
     #[test]

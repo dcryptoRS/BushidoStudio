@@ -1,0 +1,32 @@
+# A colour mixer on the display level. As it rests nothing changes; red's
+# saturation taken off greys a red to its own luma and leaves a green as it
+# was; a grey takes no band's change.
+
+[[probe]]
+name = "default"
+input = [0.58535, 0.003981, 0.003981, 1]
+expect = [0.58535, 0.003981, 0.003981, 1]
+
+[[probe]]
+name = "red without saturation is its own grey"
+params = { red_sat = -100 }
+input = [0.58535, 0.003981, 0.003981, 1]
+expect = [0.035492, 0.035492, 0.035492, 1]
+
+[[probe]]
+name = "a green keeps its colour when red changes"
+params = { red_sat = -100, red_lum = 100 }
+input = [0.003981, 0.42485, 0.021012, 1]
+expect = [0.003981, 0.42485, 0.021012, 1]
+
+[[probe]]
+name = "a grey takes no band"
+at = "max"
+input = [0.2, 0.2, 0.2, 1]
+expect = [0.2, 0.2, 0.2, 1]
+
+[[probe]]
+name = "minimum on a grey"
+at = "min"
+input = [0.2, 0.2, 0.2, 1]
+expect = [0.2, 0.2, 0.2, 1]

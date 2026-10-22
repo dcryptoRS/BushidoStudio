@@ -152,7 +152,7 @@ export component ClaudePane inherits Pane {
                 alignment: start;
 
                 if Claude.entries.length == 0: Text {
-                    text: "Pídeme lo que quieras del vídeo abierto: «corta los silencios», «subtítulos palabra a palabra con la marca Royalty», «pon la LUT de S-Log3 y un look teal & orange», «un cierre con @royaltystudio».";
+                    text: I18n.t("claude.examples");
                     color: Theme.fg-muted;
                     font-size: Theme.fs-sm;
                     wrap: word-wrap;
@@ -221,7 +221,7 @@ export component ClaudePane inherits Pane {
                 if root.draft == "" && !field.has-focus: Text {
                     x: 10px;
                     y: 8px;
-                    text: Claude.busy ? "Claude está trabajando…" : "Escríbele a Claude…";
+                    text: Claude.busy ? I18n.t("claude.working") : I18n.t("claude.placeholder");
                     color: Theme.fg-muted;
                     font-size: Theme.fs-lg;
                 }

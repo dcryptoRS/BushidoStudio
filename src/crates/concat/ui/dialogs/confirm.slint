@@ -15,6 +15,10 @@ export struct ConfirmData {
     message: string,
     /// The button that goes ahead, in the danger tone: "Delete".
     action: string,
+    /// A third answer, the safe one, before the danger: "Save" before
+    /// "Don't save" (Royalty Studio fork). Empty for a question with two.
+    /// Return gives it when there is one.
+    primary: string,
 }
 
 // The confirmation sheet. Return goes ahead and Escape backs out, so a
@@ -25,6 +29,8 @@ export component ConfirmDialog inherits Modal {
 
     callback confirmed();
     callback dismissed();
+    /// The `primary` answer.
+    callback chosen();
 
     open: root.data.open;
     title: root.data.title;
@@ -48,7 +54,11 @@ export component ConfirmDialog inherits Modal {
                 return accept;
             }
             if (event.text == Key.Return) {
-                root.confirmed();
+                if (root.data.primary != "") {
+                    root.chosen();
+                } else {
+                    root.confirmed();
+                }
                 return accept;
             }
             reject
@@ -78,6 +88,12 @@ export component ConfirmDialog inherits Modal {
                     danger: true;
                     label: root.data.action;
                     clicked => { root.confirmed(); }
+                }
+
+                if root.data.primary != "": Button {
+                    primary: true;
+                    label: root.data.primary;
+                    clicked => { root.chosen(); }
                 }
             }
         }

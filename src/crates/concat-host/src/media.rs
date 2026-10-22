@@ -129,6 +129,7 @@ impl MediaSummary {
                 .map(AudioStreamInfo::to_track)
                 .collect(),
             origin: None,
+            motion: None,
             color_space: self
                 .video
                 .as_ref()
@@ -1060,6 +1061,7 @@ mod tests {
                         has_audio: false,
                         audio_tracks: Vec::new(),
                         origin: None,
+                        motion: None,
                         color_space: Default::default(),
                     },
                 })

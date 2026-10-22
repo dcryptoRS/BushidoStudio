@@ -247,6 +247,8 @@ impl MediaBin {
             MediaFilter::Images => imported && item.kind == model::MediaKind::Image,
             MediaFilter::Speech => item.origin == Some(MediaOrigin::Speech),
             MediaFilter::Processed => item.origin == Some(MediaOrigin::Processed),
+            MediaFilter::Motion => item.origin == Some(MediaOrigin::Motion),
+            MediaFilter::Generated => item.origin == Some(MediaOrigin::Generated),
         }
     }
 
@@ -459,6 +461,7 @@ mod tests {
             name: "Voice 1.wav".to_owned(),
             kind: Kind::Audio,
             origin: Some(MediaOrigin::Speech),
+            motion: None,
             ..MediaItem::default()
         });
         let names = |bin: &MediaBin| -> Vec<String> {

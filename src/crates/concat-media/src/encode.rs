@@ -49,6 +49,9 @@ pub enum VideoCodec {
     Av1,
 }
 
+/// What [`VideoCodec::encodable`] found, per codec in [`VideoCodec::ALL`]'s order.
+static ENCODABLE: [OnceLock<bool>; 3] = [const { OnceLock::new() }; 3];
+
 impl VideoCodec {
     /// Every codec, in the order a menu lists them.
     pub const ALL: [VideoCodec; 3] = [VideoCodec::H264, VideoCodec::Hevc, VideoCodec::Av1];
@@ -176,14 +179,25 @@ impl VideoCodec {
     /// [`encodable_among`] for the rest. A hardware encoder that is asked
     /// is opened once, at 720p, and the answer kept for the process.
     pub fn encodable(self) -> bool {
-        static KNOWN: [OnceLock<bool>; 3] = [const { OnceLock::new() }; 3];
-        let slot = VideoCodec::ALL
-            .iter()
-            .position(|codec| *codec == self)
-            .expect("every codec is in ALL");
-        *KNOWN[slot].get_or_init(|| {
+        *ENCODABLE[self.slot()].get_or_init(|| {
             encodable_among(self.linked(true, false), |name| opens_here(self, name))
         })
+    }
+
+    /// [`VideoCodec::encodable`] if something has asked it already, without
+    /// opening any encoder: for the window's thread, which should not wait
+    /// on NVENC or an AV1 encoder opening (audit 2026-10-15, M12). `None`
+    /// until then; the window asks `encodable` on a thread of its own at
+    /// start.
+    pub fn encodable_known(self) -> Option<bool> {
+        ENCODABLE[self.slot()].get().copied()
+    }
+
+    fn slot(self) -> usize {
+        VideoCodec::ALL
+            .iter()
+            .position(|codec| *codec == self)
+            .expect("every codec is in ALL")
     }
 
     /// Whether it can be written at ten bits here: some linked encoder for

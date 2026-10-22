@@ -62,6 +62,8 @@ pub fn view(view: &Value) -> Value {
                 .map(|tracks| tracks.iter().enumerate().map(|(index, track)| track_of(index, track)).collect::<Vec<_>>())
                 .unwrap_or_default(),
             "clips": clips.into_iter().map(clip_of).collect::<Vec<_>>(),
+            // The moments marked on it (Royalty Studio fork).
+            "markers": timeline["markers"].as_array().cloned().unwrap_or_default(),
         },
         "media": project["media"]
             .as_array()
@@ -88,6 +90,10 @@ fn track_of(index: usize, track: &Value) -> Value {
     if track["muted"] == json!(true) {
         out["muted"] = json!(true);
     }
+    // What the lane holds, on a timeline with picture and sound lanes.
+    if let Some(kind) = track["kind"].as_str().filter(|kind| *kind != "any") {
+        out["kind"] = json!(kind);
+    }
     out
 }
 
@@ -103,6 +109,10 @@ fn clip_of(clip: &Value) -> Value {
     out.insert("start".into(), json!(round(start, 4)));
     out.insert("duration".into(), json!(round(duration, 4)));
     out.insert("end".into(), json!(round(start + duration, 4)));
+    // The clips edited with this one: a picture and its sound share one.
+    if let Some(link) = clip["link"].as_str() {
+        out.insert("link".into(), json!(link));
+    }
     if let Some(name) = clip["name"].as_str().filter(|name| !name.is_empty()) {
         out.insert("name".into(), json!(name));
     }

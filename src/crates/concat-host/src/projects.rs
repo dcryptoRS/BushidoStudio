@@ -406,10 +406,88 @@ static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 /// interrupted halfway is worse than no save at all - a truncated manifest
 /// loses the project, while a failed rename leaves the previous one intact.
 fn write_manifest(root: &Path, encoded: &[u8]) -> Result<(), String> {
-    let manifest = manifest_path(root);
+    write_beside(root, &manifest_path(root), encoded)
+}
+
+/// Writes `encoded` to `destination` in the project folder `root` the way
+/// the manifest is written: a temporary of its own, flushed, renamed over.
+fn write_beside(root: &Path, destination: &Path, encoded: &[u8]) -> Result<(), String> {
     let mut temporary = Temporary::open(root)?;
     temporary.write(encoded)?;
-    temporary.commit(&manifest)
+    temporary.commit(destination)
+}
+
+/// The edits not saved yet, beside the manifest (Royalty Studio fork):
+/// with autosave off the project's document is written only when it is
+/// saved, and this copy as it is edited, so a window that dies with edits
+/// unsaved can offer them back on the next open.
+pub const RECOVERY: &str = "concat.recovery.json";
+
+/// The order recovery copies are written in, per project, apart from the
+/// manifest's: its own lock and the highest ticket on disk.
+fn recovery_state(root: &Path) -> Arc<Writes> {
+    write_state(&project_key(root).join(RECOVERY))
+}
+
+/// Writes a document captured at `ticket` as the project's recovery copy,
+/// in order: a snapshot older than one already written, or than a save
+/// that has discarded the copy since, is skipped.
+pub fn save_recovery(
+    path: &str,
+    document: &serde_json::Value,
+    ticket: Ticket,
+) -> Result<Saved, String> {
+    let root = PathBuf::from(path);
+    let state = recovery_state(&root);
+    let _writing = state
+        .writing
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if ticket.0 < state.written.load(Ordering::Acquire) {
+        return Ok(Saved::Superseded);
+    }
+    let encoded = serde_json::to_vec_pretty(document)
+        .map_err(|error| format!("could not encode the project: {error}"))?;
+    write_beside(&root, &root.join(RECOVERY), &encoded)?;
+    state.written.store(ticket.0, Ordering::Release);
+    Ok(Saved::Written)
+}
+
+/// Removes the project's recovery copy: the edits in it were saved, or
+/// thrown away. `ticket` is the save's, so a recovery write still on its
+/// way from before it lands nowhere.
+pub fn discard_recovery(path: &str, ticket: Ticket) {
+    let root = PathBuf::from(path);
+    let state = recovery_state(&root);
+    let _writing = state
+        .writing
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.written.fetch_max(ticket.0, Ordering::AcqRel);
+    match std::fs::remove_file(root.join(RECOVERY)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => log::warn!("project: could not remove the recovery copy: {error}"),
+    }
+}
+
+/// The project's recovery copy, when it holds edits newer than the saved
+/// document: what an open offers back. None when there is none, it is
+/// older than the manifest, or it cannot be read.
+pub fn recovery(path: &str) -> Option<serde_json::Value> {
+    let root = Path::new(path);
+    let copy = root.join(RECOVERY);
+    let copied = std::fs::metadata(&copy)
+        .and_then(|meta| meta.modified())
+        .ok()?;
+    let saved = std::fs::metadata(manifest_path(root))
+        .and_then(|meta| meta.modified())
+        .ok();
+    if saved.is_some_and(|saved| saved >= copied) {
+        return None;
+    }
+    let bytes = std::fs::read(&copy).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// True when a document carries no edit state at all - the settings-only
@@ -608,6 +686,63 @@ pub fn clear_cache(path: &str) -> Result<usize, String> {
     Ok(count)
 }
 
+/// Removes the merge renders under `media/` that no media item names any
+/// more, and says how many went.
+///
+/// A merge renders its selection into `media/merged-<stamp>/merged.mp4`
+/// and the project adopts it; undo lets the clip go but the render stays,
+/// and a quit mid-render leaves its folder behind (audit 2026-10-15, L5 and
+/// window L9). Called as a project closes, once its last save has landed,
+/// when the window's undo history is about to go with it. A folder is
+/// matched by its own name in the media paths, not the whole path, so a
+/// project moved to another disk - whose paths still name the old place
+/// until relinked - keeps its renders; and a folder holding anything a
+/// merge does not write is left alone.
+pub fn sweep_merged<'a>(root: &Path, media: impl IntoIterator<Item = &'a str>) -> usize {
+    let named: std::collections::HashSet<String> = media
+        .into_iter()
+        .flat_map(|path| {
+            Path::new(path)
+                .components()
+                .filter_map(|part| part.as_os_str().to_str())
+                .filter(|part| part.starts_with("merged-"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let Ok(entries) = std::fs::read_dir(root.join("media")) else {
+        return 0;
+    };
+    let mut swept = 0;
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(stamp) = name.strip_prefix("merged-") else {
+            continue;
+        };
+        if stamp.is_empty()
+            || !stamp.bytes().all(|byte| byte.is_ascii_digit())
+            || named.contains(&name)
+            || !entry.file_type().is_ok_and(|kind| kind.is_dir())
+        {
+            continue;
+        }
+        let folder = entry.path();
+        // The render and the export's own scratch beside it, and nothing
+        // else: anything more was put there by someone.
+        let only_ours = std::fs::read_dir(&folder).is_ok_and(|inside| {
+            inside.filter_map(Result::ok).all(|file| {
+                let file_name = file.file_name().to_string_lossy().into_owned();
+                file.file_type().is_ok_and(|kind| kind.is_file())
+                    && (file_name == "merged.mp4" || file_name.starts_with(".merged.concat-"))
+            })
+        });
+        if only_ours && std::fs::remove_dir_all(&folder).is_ok() {
+            swept += 1;
+        }
+    }
+    swept
+}
+
 /// Recursively counts the files under a directory, for the clear-cache toast.
 fn count_files(dir: &Path) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -707,6 +842,56 @@ mod tests {
             "C:\\Temp\\.tmp1/Round trip"
         ));
         assert!(same_path("C:/Work/Film/", "c:\\work\\film"));
+    }
+
+    /// A recovery copy newer than the document is offered back; a save
+    /// discards it, and a recovery write from before the save lands nowhere
+    /// (Royalty Studio fork).
+    #[test]
+    fn a_recovery_copy_is_offered_until_a_save_and_never_after_one() {
+        let root = scratch("recovery");
+        save(&root, &document("saved")).expect("saves");
+        assert!(recovery(&root).is_none(), "no copy, nothing to offer");
+        let early = ticket();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        save_recovery(&root, &document("edited"), ticket()).expect("writes the copy");
+        assert_eq!(recovery(&root), Some(document("edited")));
+        discard_recovery(&root, ticket());
+        assert!(recovery(&root).is_none());
+        assert!(matches!(
+            save_recovery(&root, &document("late"), early),
+            Ok(Saved::Superseded)
+        ));
+        assert!(!Path::new(&root).join(RECOVERY).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn merge_renders_nothing_names_are_swept_and_the_rest_kept() {
+        let root = PathBuf::from(scratch("sweep-merged"));
+        let media = root.join("media");
+        let make = |name: &str, files: &[&str]| {
+            let folder = media.join(name);
+            std::fs::create_dir_all(&folder).unwrap();
+            for file in files {
+                std::fs::write(folder.join(file), b"x").unwrap();
+            }
+            folder
+        };
+        let adopted = make("merged-100", &["merged.mp4"]);
+        let undone = make("merged-200", &["merged.mp4"]);
+        let interrupted = make("merged-300", &[".merged.concat-video.mp4"]);
+        let added_to = make("merged-400", &["merged.mp4", "notes.txt"]);
+        let not_a_merge = make("merged-take", &["merged.mp4"]);
+        // Named from where the project used to be: matched by the folder.
+        let moved = "/elsewhere/Film/media/merged-100/merged.mp4";
+        assert_eq!(sweep_merged(&root, [moved, "/clips/a.mp4"]), 2);
+        assert!(adopted.exists());
+        assert!(!undone.exists());
+        assert!(!interrupted.exists());
+        assert!(added_to.exists());
+        assert!(not_a_merge.exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A project folder of this test's own, swept if it is already there.

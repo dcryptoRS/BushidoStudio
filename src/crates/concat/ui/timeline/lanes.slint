@@ -5,8 +5,9 @@ import { Wave } from "../primitives/wave.slint";
 import { Theme } from "../theme/theme.slint";
 import { Fmt, Payload } from "../util.slint";
 import { Glyph, Icon } from "../icons.slint";
-import { ClipData, ClipKind, DropData, TimelineTool, TrackData } from "model.slint";
+import { ClipData, ClipKind, DropData, TimelineTool, TimeSpan, TrackData } from "model.slint";
 import { ContextMenu, MenuItemData } from "../primitives/context-menu.slint";
+import { Editor } from "../editor.slint";
 
 // The lanes: the ruler, the banded track stack, the clips on it, the playhead
 // and the two band gestures.
@@ -132,7 +133,8 @@ component Clip inherits Rectangle {
     in property <length> edge-grab: 6px;
 
     /// A press landed: the caller resolves the selection before any drag.
-    callback pressed(additive: bool, edge: int);
+    /// `alone`: Alt held - the clip without the clips linked to it.
+    callback pressed(additive: bool, edge: int, alone: bool);
     /// A press with the split tool: cut here, `x` into the clip.
     callback split-at(x: length);
     /// The volume line dragged to `gain` - linear, 1 being unity, 2 the
@@ -534,6 +536,8 @@ component Clip inherits Rectangle {
     touch := TouchArea {
         enabled: !root.locked;
         mouse-cursor: root.tool == TimelineTool.split ? MouseCursor.crosshair
+            : root.tool == TimelineTool.roll ? (root.edge-at >= 0 ? MouseCursor.col-resize : MouseCursor.default)
+            : (root.tool == TimelineTool.slip || root.tool == TimelineTool.slide) ? MouseCursor.ew-resize
             : root.edge-at >= 0 ? MouseCursor.ew-resize : MouseCursor.grab;
 
         changed mouse-x => {
@@ -569,7 +573,7 @@ component Clip inherits Rectangle {
                 self.travelled = false;
                 self.on-edge = root.edge-at >= 0;
                 root.pressed(event.modifiers.shift || event.modifiers.control
-                    || event.modifiers.meta, root.edge-at);
+                    || event.modifiers.meta, root.edge-at, event.modifiers.alt);
             } else if (event.kind == PointerEventKind.up
                 || event.kind == PointerEventKind.cancel) {
                 // Only a release ends it. Slint delivers `move` here too, so a
@@ -592,7 +596,9 @@ component Clip inherits Rectangle {
                 || Math.abs(self.absolute-position.y + self.mouse-y - self.origin-y) > 4px) {
                 self.travelled = true;
             }
-            if (self.travelled && root.tool == TimelineTool.select) {
+            // The roll, slip and slide tools drag as the arrow does
+            // (Royalty Studio fork); only the razor never drags.
+            if (self.travelled && root.tool != TimelineTool.split) {
                 root.pointer-at(self.mouse-x);
                 root.dragged(
                     (self.absolute-position.x + self.mouse-x - self.origin-x)
@@ -757,7 +763,7 @@ component Clip inherits Rectangle {
             mouse-cursor: MouseCursor.pointer;
             pointer-event(event) => {
                 if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
-                    root.pressed(false, 2);
+                    root.pressed(false, 2, false);
                 } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
                     root.released();
                 }
@@ -829,7 +835,7 @@ component Clip inherits Rectangle {
                     self.origin-y = self.absolute-position.y + self.mouse-y;
                     self.is-dragging = true;
                     root.left-handle-drag = true;
-                    root.pressed(event.modifiers.shift || event.modifiers.control || event.modifiers.meta, 2);
+                    root.pressed(event.modifiers.shift || event.modifiers.control || event.modifiers.meta, 2, event.modifiers.alt);
                 } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
                     self.is-dragging = false;
                     root.left-handle-drag = false;
@@ -912,7 +918,7 @@ component Clip inherits Rectangle {
                     self.origin-y = self.absolute-position.y + self.mouse-y;
                     self.is-dragging = true;
                     root.right-handle-drag = true;
-                    root.pressed(event.modifiers.shift || event.modifiers.control || event.modifiers.meta, 2);
+                    root.pressed(event.modifiers.shift || event.modifiers.control || event.modifiers.meta, 2, event.modifiers.alt);
                 } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
                     self.is-dragging = false;
                     root.right-handle-drag = false;
@@ -1012,7 +1018,7 @@ component Clip inherits Rectangle {
                         self.origin-y = self.absolute-position.y + self.mouse-y;
                         self.is-dragging = true;
                         root.trans-btn-drag = true;
-                        root.pressed(event.modifiers.shift || event.modifiers.control || event.modifiers.meta, 2);
+                        root.pressed(event.modifiers.shift || event.modifiers.control || event.modifiers.meta, 2, event.modifiers.alt);
                     } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
                         self.is-dragging = false;
                         root.trans-btn-drag = false;
@@ -1054,6 +1060,19 @@ export component Lanes inherits Rectangle {
     /// The zoom: seconds covered by one pixel.
     in property <float> seconds-per-pixel: 0.05;
     in property <length> track-scroll;
+    /// The line between pictures and sound (Royalty Studio fork): how many
+    /// rows from the top hold pictures - zero for one stack scrolled as one,
+    /// as a timeline without kinds and the phone have - where the line sits
+    /// down from the ruler, and how far each side is moved. The picture rows
+    /// hang above the line and the sound rows below it, each side scrolled
+    /// on its own, as Premiere's and Resolve's are.
+    in property <int> video-rows: 0;
+    in property <length> split;
+    in property <length> video-offset;
+    in property <length> audio-offset;
+    /// Stretches drawn over every lane as about to be taken out: the
+    /// pauses Cut Pauses found (Royalty Studio fork).
+    in property <[TimeSpan]> cuts;
     in property <length> ruler-height: 28px;
     /// How close to a clip's edge counts as taking hold of it. A pointer
     /// finds six pixels; a finger wants more.
@@ -1107,7 +1126,7 @@ export component Lanes inherits Rectangle {
             hover-off-timer.running = true;
         }
     }
-    callback clip-pressed(id: string, additive: bool, edge: int);
+    callback clip-pressed(id: string, additive: bool, edge: int, alone: bool);
     /// The split tool pressed a clip: cut it at `seconds` on the timeline.
     callback clip-split(id: string, seconds: float);
     /// A clip's volume line dragged to `gain`.
@@ -1146,7 +1165,9 @@ export component Lanes inherits Rectangle {
     callback band-selected(from-seconds: float, to-seconds: float,
         from-y: length, to-y: length, additive: bool);
     callback scrolled(seconds: float);
-    callback track-scrolled(pixels: length);
+    /// The stack scrolled by `pixels`, the pointer `y` down the lane area:
+    /// which side of the line scrolls, when there is one.
+    callback track-scrolled(pixels: length, y: length);
     callback zoomed(factor: float, anchor-seconds: float);
     /// A finger landed on the lanes, or two began a pinch: whatever was
     /// still gliding stops. Only with `finger`.
@@ -1213,7 +1234,7 @@ export component Lanes inherits Rectangle {
             root.scrubbed(Math.max(0,
                 root.finger-playhead - (x - root.finger-x) / root.px-per-second));
         } else if (root.finger-axis == 2) {
-            root.track-scrolled(root.finger-last-y - y);
+            root.track-scrolled(root.finger-last-y - y, y);
             root.finger-last-y = y;
         }
     }
@@ -1273,11 +1294,27 @@ export component Lanes inherits Rectangle {
     /// is the caller's to resolve. Both start at the foot of the ruler, so
     /// their local y needs only the scroll adding to it.
     pure function stack-y(y: length) -> length {
-        return y + root.track-scroll;
+        return root.video-rows <= 0 ? y + root.track-scroll
+            : (y < root.split ? y - root.video-offset : y - root.audio-offset);
+    }
+    /// How far a row is moved from where the stack puts it: the one scroll,
+    /// or its side's offset when there is a line between pictures and sound.
+    pure function shift(row: int) -> length {
+        return root.video-rows <= 0 ? -root.track-scroll
+            : (row < root.video-rows ? root.video-offset : root.audio-offset);
+    }
+    /// Where a row's side of the line starts inside the lane area, and how
+    /// tall it is: the whole area for one stack.
+    pure function area-top(row: int) -> length {
+        return root.video-rows > 0 && row >= root.video-rows ? root.split : 0px;
+    }
+    pure function area-h(row: int) -> length {
+        return root.video-rows <= 0 ? root.lanes-h
+            : (row < root.video-rows ? root.split : root.lanes-h - root.split);
     }
     /// The top of a row inside the lane area, scroll included.
     pure function row-y(row: int) -> length {
-        return root.ruler-height + root.tracks[row].top - root.track-scroll;
+        return root.ruler-height + root.tracks[row].top + root.shift(row);
     }
 
     // The ruler's tick ladder, from Rust. Zero means unbound, which draws no
@@ -1366,27 +1403,47 @@ export component Lanes inherits Rectangle {
                     - event.delta-x / root.px-per-second));
             }
             if (event.delta-y != 0px) {
-                root.track-scrolled(-event.delta-y);
+                root.track-scrolled(-event.delta-y, self.mouse-y - root.ruler-height);
             }
             return EventResult.accept;
         }
 
         // ── banded lanes ─────────────────────────────────────────────────
+        // Each row inside its side of the line, which clips it: a side
+        // scrolled on its own never draws over the other.
         for track[row] in root.tracks: Rectangle {
             x: 0;
-            y: root.ruler-height + track.top - root.track-scroll;
+            y: root.ruler-height + root.area-top(row);
             width: parent.width;
-            height: track.height;
-            background: Math.mod(row, 2) == 0 ? Theme.lane : Theme.lane-alt;
-            visible: self.y + track.height > root.ruler-height && self.y < root.height;
+            height: root.area-h(row);
+            clip: true;
 
             Rectangle {
                 x: 0;
-                y: parent.height - 1px;
+                y: track.top + root.shift(row) - root.area-top(row);
                 width: parent.width;
-                height: 1px;
-                background: Theme.line;
+                height: track.height;
+                background: Math.mod(row, 2) == 0 ? Theme.lane : Theme.lane-alt;
+                visible: self.y + track.height > 0 && self.y < parent.height;
+
+                Rectangle {
+                    x: 0;
+                    y: parent.height - 1px;
+                    width: parent.width;
+                    height: 1px;
+                    background: Theme.line;
+                }
             }
+        }
+
+        // The line between the pictures and the sound (Royalty Studio fork):
+        // where the two sides meet; the pane drags it.
+        if root.video-rows > 0: Rectangle {
+            x: 0;
+            y: root.ruler-height + root.split - 1px;
+            width: parent.width;
+            height: 2px;
+            background: Theme.line-strong;
         }
 
         // The grid: one rule per ruler tick, so a clip edge can be read
@@ -1484,15 +1541,24 @@ export component Lanes inherits Rectangle {
         }
 
         // ── the clips ────────────────────────────────────────────────────
-        for entry in root.clips: Clip {
+        // Each clip inside its row's side of the line, which clips it, as the
+        // rows are.
+        for entry in root.clips: Rectangle {
+            x: 0;
+            y: root.ruler-height + root.area-top(entry.row);
+            width: parent.width;
+            height: root.area-h(entry.row);
+            clip: true;
+
+          Clip {
             x: root.at(entry.start);
             // Both from the lane it sits on, so a clip follows its row's
             // height without a second copy of it to keep in step.
-            y: root.row-y(entry.row) + 4px;
+            y: root.tracks[entry.row].top + root.shift(entry.row) - root.area-top(entry.row) + 4px;
             width: Math.max(2px, entry.duration * root.px-per-second);
             height: Math.max(2px, root.tracks[entry.row].height - 10px);
             visible: self.x + self.width > 0 && self.x < root.width
-                && self.y + self.height > root.ruler-height && self.y < root.height;
+                && self.y + self.height > 0 && self.y < parent.height;
 
             item: entry;
             px-per-second: root.px-per-second;
@@ -1510,7 +1576,7 @@ export component Lanes inherits Rectangle {
             // click near the lanes' edge scrolled the view and moved the
             // clip by the last drag's distance.
             // https://github.com/jub0t/Concat/issues/247
-            pressed(additive, edge) => {
+            pressed(additive, edge, alone) => {
                 if (root.finger) {
                     root.finger-held();
                 }
@@ -1518,7 +1584,7 @@ export component Lanes inherits Rectangle {
                 root.drag-seconds = 0;
                 root.drag-pixels = 0;
                 root.clip-dragging = false;
-                root.clip-pressed(entry.id, additive, edge);
+                root.clip-pressed(entry.id, additive, edge, alone);
             }
             split-at(x) => {
                 root.clip-split(entry.id, entry.start + x / root.px-per-second);
@@ -1563,6 +1629,28 @@ export component Lanes inherits Rectangle {
                 menu.request-y = wheel.mouse-y;
                 root.asked = true;
                 root.clip-context(entry.id);
+            }
+          }
+        }
+
+        // ── the pauses about to be cut ───────────────────────────────────
+        for span in root.cuts: Rectangle {
+            x: root.at(span.start);
+            y: root.ruler-height;
+            width: Math.max(1px, (span.end - span.start) * root.px-per-second);
+            height: root.lanes-h;
+            visible: self.x + self.width > 0 && self.x < root.width;
+            background: Theme.danger.with-alpha(0.22);
+
+            Rectangle {
+                x: 0;
+                width: 1px;
+                background: Theme.danger.with-alpha(0.7);
+            }
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                background: Theme.danger.with-alpha(0.7);
             }
         }
 
@@ -1658,6 +1746,17 @@ export component Lanes inherits Rectangle {
                     overflow: elide;
                 }
             }
+        }
+
+        // A marker's moment down the lanes, faint, to cut on (Royalty Studio
+        // fork).
+        for marker in Editor.markers: Rectangle {
+            x: root.at(marker.time);
+            y: root.ruler-height;
+            width: 1px;
+            height: root.lanes-h;
+            background: marker.tint.with-alpha(0.45);
+            visible: self.x >= 0 && self.x < parent.width;
         }
 
         // ── the ruler ────────────────────────────────────────────────────
@@ -1762,6 +1861,77 @@ export component Lanes inherits Rectangle {
                         root.scrubbed(Math.max(0, root.seconds-at(self.mouse-x)));
                     }
                 }
+            }
+
+            // The in and out points (Royalty Studio fork): the stretch
+            // between them shaded along the ruler, each end a bracket.
+            if Editor.mark-in >= 0 || Editor.mark-out >= 0: Rectangle {
+                property <float> from: Editor.mark-in >= 0 ? Editor.mark-in : 0;
+                property <float> to: Editor.mark-out >= 0 ? Editor.mark-out : Editor.duration-seconds;
+                x: root.at(self.from);
+                y: 0;
+                width: Math.max(1px, root.at(self.to) - root.at(self.from));
+                height: root.ruler-height;
+                background: Theme.accent.with-alpha(0.18);
+
+                if Editor.mark-in >= 0: Rectangle {
+                    x: 0;
+                    y: 0;
+                    width: 2px;
+                    height: parent.height;
+                    background: Theme.accent;
+                }
+                if Editor.mark-out >= 0: Rectangle {
+                    x: parent.width - 2px;
+                    y: 0;
+                    width: 2px;
+                    height: parent.height;
+                    background: Theme.accent;
+                }
+            }
+
+            // The markers (Royalty Studio fork): a flag at the top of the
+            // ruler in the marker's colour, clicked to go there, dragged to
+            // move it, double-clicked to name it.
+            for marker in Editor.markers: TouchArea {
+                property <float> drag-to: marker.time;
+                property <bool> dragging;
+
+                x: root.at(self.dragging ? self.drag-to : marker.time) - 6px;
+                y: 0;
+                width: 12px;
+                height: 14px;
+                mouse-cursor: pointer;
+
+                Path {
+                    width: 12px;
+                    height: 14px;
+                    viewbox-width: 12;
+                    viewbox-height: 14;
+                    commands: "M 1 0 L 11 0 L 11 8 L 6 13 L 1 8 Z";
+                    fill: marker.tint;
+                    stroke: Theme.ruler;
+                    stroke-width: 1px;
+                }
+
+                moved => {
+                    if (self.pressed) {
+                        self.dragging = true;
+                        self.drag-to = Math.max(0,
+                            root.seconds-at(root.at(marker.time) + self.mouse-x - self.pressed-x));
+                    }
+                }
+                pointer-event(event) => {
+                    if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                        if (self.dragging && Math.abs(self.drag-to - marker.time) > 0.0005) {
+                            Editor.marker-moved(marker.id, self.drag-to);
+                        } else if (event.kind == PointerEventKind.up) {
+                            root.scrubbed(marker.time);
+                        }
+                        self.dragging = false;
+                    }
+                }
+                double-clicked => { Editor.marker-opened(marker.id); }
             }
 
             // The selected clip's keys, as diamonds on the ruler's floor:

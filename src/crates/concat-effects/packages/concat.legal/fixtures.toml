@@ -1,0 +1,38 @@
+# Legal levels on the display level. As it rests a colour inside the range
+# is untouched and light past white comes down to white; a lower ceiling
+# brings white down to it, and a floor lifts black to it.
+
+[[probe]]
+name = "default"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.3, 0.2, 0.12, 1]
+
+[[probe]]
+name = "light past white comes down to white"
+input = [4, 4, 4, 1]
+expect = [1, 1, 1, 1]
+
+[[probe]]
+name = "a ceiling of 90 holds white there"
+params = { ceiling = 90 }
+input = [1, 1, 1, 1]
+expect = [0.776573, 0.776573, 0.776573, 1]
+
+[[probe]]
+name = "a floor lifts black"
+params = { floor = 5 }
+input = [0, 0, 0, 1]
+expect = [0.000754, 0.000754, 0.000754, 1]
+
+# At either end of every knob a mid colour is inside the range: untouched.
+[[probe]]
+name = "minimum"
+at = "min"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.3, 0.2, 0.12, 1]
+
+[[probe]]
+name = "maximum"
+at = "max"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.3, 0.2, 0.12, 1]

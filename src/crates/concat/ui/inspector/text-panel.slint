@@ -344,6 +344,10 @@ export component TextPanel inherits VerticalLayout {
 
         SwitchRow {
             label: I18n.t("textPanel.italic");
+            // A pick sets the control's own value, cutting this binding: this
+            // follows the data and puts it back (audit 2026-10-12, #8).
+            property <bool> wanted: root.selected.italic;
+            changed wanted => { self.checked = self.wanted; }
             checked: root.selected.italic;
             toggled(on) => { root.set(ClipField.italic, on ? 1 : 0); root.commit(); }
         }
@@ -372,6 +376,10 @@ export component TextPanel inherits VerticalLayout {
 
         SwitchRow {
             label: I18n.t("textPanel.dropShadow");
+            // A pick sets the control's own value, cutting this binding: this
+            // follows the data and puts it back (audit 2026-10-12, #8).
+            property <bool> wanted: root.selected.shadow;
+            changed wanted => { self.checked = self.wanted; }
             checked: root.selected.shadow;
 
             HelpButton { text: I18n.t("textPanel.softShadowUnderWords"); }
@@ -384,6 +392,10 @@ export component TextPanel inherits VerticalLayout {
         // transparent is what "none" is stored as.
         SwitchRow {
             label: I18n.t("textPanel.background");
+            // A pick sets the control's own value, cutting this binding: this
+            // follows the data and puts it back (audit 2026-10-12, #8).
+            property <bool> wanted: root.selected.plated;
+            changed wanted => { self.checked = self.wanted; }
             checked: root.selected.plated;
 
             HelpButton { text: I18n.t("textPanel.solidBoxBehindWords"); }

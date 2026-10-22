@@ -849,6 +849,7 @@ impl WgpuCompositor {
     fn on_backends(backends: wgpu::Backends, software_only: bool) -> Option<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends,
+            flags: instance_flags(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let choices: &[bool] = if software_only {
@@ -959,6 +960,17 @@ impl WgpuCompositor {
     /// texture is made, rather than met with a validation error mid-export.
     pub fn max_side(&self) -> u32 {
         concat_core::frame::MAX_SIDE.min(self.device.limits().max_texture_dimension_2d)
+    }
+
+    /// The device this draws on: for work beside the compositing, as the
+    /// scopes are, that must go to the same queue.
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// The queue this submits to.
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
     }
 
     /// Builds a compositor on a device the caller owns - the window's, so a
@@ -3683,3 +3695,12 @@ impl WgpuCompositor {
 
 #[cfg(test)]
 mod tests;
+
+/// The instance's flags: the build's, without debug labels on Vulkan
+/// objects unless `WGPU_DEBUG` asks for them. Debug builds set them, and
+/// on NVIDIA's Vulkan driver two compositors naming their buffers on two
+/// threads at once crashed in the loader (`vkSetDebugUtilsObjectNameEXT`),
+/// which took the export tests down at random (Royalty Studio fork).
+pub fn instance_flags() -> wgpu::InstanceFlags {
+    (wgpu::InstanceFlags::from_build_config() - wgpu::InstanceFlags::DEBUG).with_env()
+}

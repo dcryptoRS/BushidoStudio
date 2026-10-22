@@ -30,7 +30,7 @@ export enum MediaKind { video, audio, image }
 /// the row that is highlighted when every import is on, which is why it is a
 /// value here and not the absence of one. `speech` is the Generated group's
 /// shelf: what the editor read aloud, which the Media rows leave out.
-export enum MediaFilter { all, video, audio, images, speech, processed }
+export enum MediaFilter { all, video, audio, images, speech, processed, motion, generated }
 
 /// One look a title can be given, as the Text page's Presets shelf shows
 /// it: enough of the style to draw the name in it. Published by Rust from
@@ -1703,6 +1703,12 @@ export component MediaPane inherits Rectangle {
     /// What the editor made, by origin; not in `count-all`.
     in property <int> count-speech;
     in property <int> count-processed;
+    /// Motion graphics with their recipe (Royalty Studio fork).
+    in property <int> count-motion;
+    /// Made by a generating service, and the sheet that makes more
+    /// (Royalty Studio fork).
+    in property <int> count-generated;
+    callback generate();
     /// how many of the whole bin are selected, not how many of `items` are
     in property <int> selected-count;
     in property <bool> importing;
@@ -2143,6 +2149,25 @@ export component MediaPane inherits Rectangle {
                             current: root.filter == MediaFilter.processed;
                             clicked => { root.narrow(MediaFilter.processed); }
                         }
+                        // Rendered by concat-studio from a Remotion
+                        // template, and editable on the Motion tab
+                        // (Royalty Studio fork).
+                        if root.generated-open: CategoryRow {
+                            height: 24px;
+                            label: I18n.t("mediaPane.motionGraphics");
+                            count: root.count-motion;
+                            current: root.filter == MediaFilter.motion;
+                            clicked => { root.narrow(MediaFilter.motion); }
+                        }
+                        // Made from a prompt by Higgsfield, Seedance or
+                        // Gemini (Royalty Studio fork).
+                        if root.generated-open: CategoryRow {
+                            height: 24px;
+                            label: I18n.t("mediaPane.generatedAi");
+                            count: root.count-generated;
+                            current: root.filter == MediaFilter.generated;
+                            clicked => { root.narrow(MediaFilter.generated); }
+                        }
                     }
 
                     // Audio: the user's own sounds.
@@ -2477,9 +2502,36 @@ export component MediaPane inherits Rectangle {
                         ? I18n.t("mediaPane.nothingReadAloudYet")
                         : root.filter == MediaFilter.processed
                         ? I18n.t("mediaPane.nothingRenderedYetRight")
+                        : root.filter == MediaFilter.motion
+                        ? I18n.t("mediaPane.nothingMotionYet")
+                        : root.filter == MediaFilter.generated
+                        ? I18n.t("mediaPane.nothingGeneratedYet")
                         : root.count-all > 0
                         ? I18n.t("mediaPane.nothingKindProject")
-                        : "Drop video and audio files anywhere in the window to import them.";
+                        : I18n.t("mediaPane.dropToImport");
+                }
+
+                // The Generated with AI shelf, empty: the way to fill it
+                // (Royalty Studio fork).
+                if root.tab == 0 && root.items.length == 0 && root.filter == MediaFilter.generated: HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: pill-text.preferred-width + 32px;
+                        height: 28px;
+                        border-radius: self.height / 2;
+                        background: pill.has-hover ? Theme.accent.brighter(8%) : Theme.accent;
+                        pill-text := Text {
+                            text: I18n.t("tray.generateAi");
+                            color: Theme.on-accent;
+                            font-size: Theme.fs;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                        pill := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.generate(); }
+                        }
+                    }
                 }
 
                 if root.tab == 0 && root.items.length > 0: HorizontalLayout {

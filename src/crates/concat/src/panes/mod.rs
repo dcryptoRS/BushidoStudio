@@ -16,6 +16,7 @@
 
 pub mod captions;
 pub mod export;
+pub mod generate;
 pub mod glide;
 pub mod media_bin;
 pub mod monitor;
@@ -40,6 +41,8 @@ pub enum Msg {
     Captions(captions::CaptionsMsg),
     /// To the speech sheet.
     Speech(speech::SpeechMsg),
+    /// To the Generate with AI sheet (Royalty Studio fork).
+    Generate(generate::GenerateMsg),
     /// To the missing media dialog.
     Relink(relink::RelinkMsg),
     /// To the project sheet.
@@ -85,8 +88,8 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
             | TimelineMsg::Resized(_),
         )
         | Msg::Export(ExportMsg::Progress { .. })
-        | Msg::Captions(CaptionsMsg::Progress(_))
-        | Msg::Speech(SpeechMsg::Progress(_))
+        | Msg::Captions(CaptionsMsg::Progress(..))
+        | Msg::Speech(SpeechMsg::Progress(..))
         | Msg::Settings(SettingsMsg::ModelProgress { .. } | SettingsMsg::InstallProgress { .. }) => {
             return None;
         }
@@ -98,28 +101,28 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
         Msg::Export(ExportMsg::Start) => {
             return Some(Activity::once(Info, "export: started".to_owned()));
         }
-        Msg::Export(ExportMsg::Finished(Ok(path))) => {
+        Msg::Export(ExportMsg::Finished(_, Ok(path))) => {
             return Some(Activity::once(Info, format!("export: finished, {path}")));
         }
-        Msg::Export(ExportMsg::Finished(Err(error))) => {
+        Msg::Export(ExportMsg::Finished(_, Err(error))) => {
             return Some(Activity::once(Info, format!("export: failed, {error}")));
         }
         Msg::Captions(CaptionsMsg::Begin) => {
             return Some(Activity::once(Info, "captions: started".to_owned()));
         }
-        Msg::Captions(CaptionsMsg::Finished(Ok(segments))) => {
+        Msg::Captions(CaptionsMsg::Finished(_, Ok(segments))) => {
             return Some(Activity::once(
                 Info,
                 format!("captions: finished, {} segments", segments.len()),
             ));
         }
-        Msg::Captions(CaptionsMsg::Finished(Err(error))) => {
+        Msg::Captions(CaptionsMsg::Finished(_, Err(error))) => {
             return Some(Activity::once(Info, format!("captions: failed, {error}")));
         }
         Msg::Speech(SpeechMsg::Begin) => {
             return Some(Activity::once(Info, "speech: started".to_owned()));
         }
-        Msg::Speech(SpeechMsg::Finished(result)) => {
+        Msg::Speech(SpeechMsg::Finished(_, result)) => {
             return Some(Activity::once(
                 Info,
                 match result.as_ref() {
