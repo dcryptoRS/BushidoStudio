@@ -2129,6 +2129,19 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     editor.on_scope_view_changed(on_window!(|state, view: i32| {
         state.choose_scope(view);
     }));
+    // The Speed panel's ramps and slow motion (Royalty Studio fork).
+    editor.on_speed_ramp_chosen(on_window!(|state, index: i32| {
+        state.choose_ramp(index);
+    }));
+    editor.on_speed_ramp_point(on_window!(|state, index: i32, x: f32, y: f32| {
+        state.ramp_point(index, x, y);
+    }));
+    editor.on_speed_ramp_remove(on_window!(|state, index: i32| {
+        state.ramp_remove(index);
+    }));
+    editor.on_speed_smooth_slow(on_window!(|state| {
+        state.smooth_slow();
+    }));
     // Generate with AI (Royalty Studio fork).
     editor.on_generate(on_window!(|state| {
         state.handle(Msg::Generate(GenerateMsg::Toggle));

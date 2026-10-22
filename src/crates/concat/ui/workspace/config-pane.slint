@@ -13,7 +13,7 @@ import {
     TransitionPanel, VideoPanel,
 } from "../inspector/clip-inspector.slint";
 import {
-    CurveData, CurveGroupData, WheelData, WheelGroupData,
+    CurveData, CurveGroupData, CurvePointData, WheelData, WheelGroupData,
 } from "../inspector/grading.slint";
 import { TextPanel } from "../inspector/text-panel.slint";
 import { MotionPanel } from "../inspector/motion-panel.slint";
@@ -172,6 +172,17 @@ export component ConfigPane inherits Rectangle {
     /// `entry` -1 is the colour panel's, else a link of the picture's chain.
     callback curve-point(entry: int, key: string, point: int, x: float, y: float);
     callback curve-remove(entry: int, key: string, point: int);
+    /// The Speed panel's ramp and slow motion (Royalty Studio fork); see
+    /// Editor.speed-ramp.
+    in property <int> speed-ramp;
+    in property <string> speed-ramp-path;
+    in property <[CurvePointData]> speed-ramp-points;
+    in property <string> speed-note;
+    in property <float> speed-smooth;
+    callback speed-ramp-chosen(index: int);
+    callback speed-ramp-point(index: int, x: float, y: float);
+    callback speed-ramp-remove(index: int);
+    callback speed-smooth-slow();
 
     /// See Editor.inspector-jump-token: the library applied something and
     /// this pane should show it.
@@ -673,6 +684,15 @@ export component ConfigPane inherits Rectangle {
                         selected: root.selected;
                         set(field, value) => { root.clip-set(field, value); }
                         commit => { root.clip-commit(); }
+                        ramp: root.speed-ramp;
+                        ramp-path: root.speed-ramp-path;
+                        ramp-points: root.speed-ramp-points;
+                        speed-note: root.speed-note;
+                        smooth-speed: root.speed-smooth;
+                        ramp-chosen(index) => { root.speed-ramp-chosen(index); }
+                        ramp-point(index, x, y) => { root.speed-ramp-point(index, x, y); }
+                        ramp-remove(index) => { root.speed-ramp-remove(index); }
+                        smooth-slow => { root.speed-smooth-slow(); }
                     }
                 }
 
@@ -731,6 +751,15 @@ export component ConfigPane inherits Rectangle {
                         selected: root.selected;
                         set(field, value) => { root.clip-set(field, value); }
                         commit => { root.clip-commit(); }
+                        ramp: root.speed-ramp;
+                        ramp-path: root.speed-ramp-path;
+                        ramp-points: root.speed-ramp-points;
+                        speed-note: root.speed-note;
+                        smooth-speed: root.speed-smooth;
+                        ramp-chosen(index) => { root.speed-ramp-chosen(index); }
+                        ramp-point(index, x, y) => { root.speed-ramp-point(index, x, y); }
+                        ramp-remove(index) => { root.speed-ramp-remove(index); }
+                        smooth-slow => { root.speed-smooth-slow(); }
                     }
                     // The three treatments, between the mix and the library:
                     // they are chain links like any other, but they are the

@@ -33,6 +33,7 @@ import {
     ColorWheel,
     CurveData,
     CurveEditor,
+    CurvePointData,
     CurveGroupData,
     WheelData,
     WheelGroupData,
@@ -2354,9 +2355,23 @@ export component SpeedPanel inherits VerticalLayout {
     /// The panel's first section, with no hairline above it; false where
     /// it follows another, as it does under Basic.
     in property <bool> first: true;
+    /// The ramp (Royalty Studio fork): which preset the clip's speed curve
+    /// is - 0 a constant rate, 1.. the presets, -1 one drawn - the curve as
+    /// the editor draws it, its points, what is said about slow motion, and
+    /// the slowest the file gives with no frame repeated (0 when it gives
+    /// none).
+    in property <int> ramp;
+    in property <string> ramp-path;
+    in property <[CurvePointData]> ramp-points;
+    in property <string> speed-note;
+    in property <float> smooth-speed;
 
     callback set(field: ClipField, value: float);
     callback commit();
+    callback ramp-chosen(index: int);
+    callback ramp-point(index: int, x: float, y: float);
+    callback ramp-remove(index: int);
+    callback smooth-slow();
 
     property <float> speed;
     function seed() { root.speed = root.selected.speed; }
@@ -2393,6 +2408,65 @@ export component SpeedPanel inherits VerticalLayout {
                 fmt: ParamFormat.rate;
                 unit: "x";
                 changed(v) => { root.set(ClipField.speed, v); root.commit(); }
+            }
+
+            // A ramp from a preset, or drawn on the curve below (Royalty
+            // Studio fork).
+            Row {
+                label: I18n.t("speed.ramp");
+                Select {
+                    property <int> wanted: root.ramp < 0 ? 7 : root.ramp;
+                    changed wanted => { self.current = self.wanted; }
+                    current: root.ramp < 0 ? 7 : root.ramp;
+                    options: [
+                        I18n.t("speed.rampConstant"), I18n.t("speed.rampMontage"),
+                        I18n.t("speed.rampHero"), I18n.t("speed.rampBullet"),
+                        I18n.t("speed.rampJump"), I18n.t("speed.rampFlashIn"),
+                        I18n.t("speed.rampFlashOut"), I18n.t("speed.rampDrawn"),
+                    ];
+                    changed(index) => {
+                        if (index < 7) {
+                            root.ramp-chosen(index);
+                        }
+                    }
+                }
+            }
+            CurveEditor {
+                curves: [{
+                    entry: -1,
+                    key: "speed",
+                    label: I18n.t("speed.curve"),
+                    group: "",
+                    points: root.ramp-points,
+                    path: root.ramp-path,
+                    hue: false,
+                    speed: true,
+                }];
+                point(key, index, x, y) => { root.ramp-point(index, x, y); }
+                remove(key, index) => { root.ramp-remove(index); }
+            }
+            Text {
+                text: I18n.t("speed.curveHint");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+
+            // Slow motion with every frame its own, for a clip shot fast
+            // enough to give it.
+            if root.speed-note != "": Text {
+                text: root.speed-note;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+            if root.smooth-speed > 0: HorizontalLayout {
+                alignment: start;
+                Button {
+                    label: I18n.t1("speed.smoothButton", Math.round(root.smooth-speed * 100));
+                    glyph: Glyph.clock;
+                    clicked => { root.smooth-slow(); }
+                }
             }
         }
     }

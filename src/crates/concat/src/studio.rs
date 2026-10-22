@@ -49,6 +49,7 @@ mod consolidate;
 mod editing;
 use consolidate::{MergeChecked, MergeJob};
 mod masking;
+mod speed;
 use masking::{MaskFrame, MaskGrip};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
@@ -1974,6 +1975,7 @@ fn grading_rows(
                         )
                         .into(),
                         hue: param.across == concat_effects::CurveAcross::Hue,
+                        speed: false,
                     },
                     points,
                 ));
@@ -9708,6 +9710,7 @@ impl Studio {
         // The Claude pane's note follows the project that is open.
         crate::claude::publish(self, app);
         editor.set_selected_clip(selected);
+        self.publish_speed(&editor);
         editor.set_selected_transition(self.selected_transition_data());
         // The background and Fit and Fill, on their own global: the Details
         // panel, the Video panel and the phone all read it.

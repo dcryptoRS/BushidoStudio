@@ -169,6 +169,32 @@ grade everything beneath them; masks to isolate.
 - Change something on screen every few seconds (a cut, a punch-in, text, a
   B-roll shot) to hold attention; end with a clear call to action.
 
+## Speed: slow and fast motion
+
+- Slow motion is only as smooth as the frames the file has. On a 30 fps
+  timeline a clip shot at 60 fps slows to 50 %, at 120 to 25 %, at 240 to
+  12.5 %, with every frame its own; slower than that, or any slowing of a
+  clip shot at the timeline's own rate, shows frames twice and stutters.
+  `timeline_read` gives each medium's `frameRate`: slow a high-rate clip to
+  timeline rate over its rate (`clip_speed` with `speed`: 30/120 = 0.25) for
+  real slow motion, and say so when the footage cannot give it.
+- Fast motion has no such limit: 2× to 4× for time passing, 8× and up for
+  a timelapse feel. The clip keeps the same stretch of its file, so its
+  length on the timeline changes; mute or replace the sound past about 1.5×.
+- A speed ramp is a curve over the clip: `edit_apply` with
+  `{"op": "setClipSpeedCurve", "clipId": "c3", "curve": [{"at": 0, "speed": 2},
+  {"at": 0.38, "speed": 0.3}, {"at": 0.62, "speed": 0.3}, {"at": 1, "speed": 2}]}`
+  (`at` a fraction of the clip, `speed` times as shot, straight lines
+  between; `"curve": null` goes back to a constant rate). The presets the
+  Speed panel offers, as reels use them: Montage
+  0→1.6, 0.3→1.6, 0.5→0.45, 0.7→1.6, 1→1.6; Hero 0→2, 0.38→0.3, 0.62→0.3,
+  1→2; Bullet 0→3, 0.42→0.2, 0.58→0.2, 1→3; Jump 0→1, 0.38→1, 0.45→4,
+  0.55→4, 0.62→1, 1→1; Flash in 0→4, 0.3→1, 1→1; Flash out 0→1, 0.7→1, 1→4.
+- Put a ramp's slow stretch on the action's peak (the jump at its height,
+  the cut of the blade, the turn of the head) and its fast stretches on
+  what leads in and out, landing the change of speed on a beat of the
+  music. A ramp's slow part repeats frames too unless the clip was shot fast.
+
 ## Generated media
 
 `media_generate` makes a clip or a picture with the services the person

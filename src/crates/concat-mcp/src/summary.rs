@@ -190,6 +190,11 @@ fn media_of(item: &Value) -> Value {
         out["width"] = item["width"].clone();
         out["height"] = item["height"].clone();
     }
+    // How fast it was shot (Royalty Studio fork): how far it slows with no
+    // frame shown twice.
+    if let Some(rate) = item["frameRate"].as_f64() {
+        out["frameRate"] = json!(round(rate, 3));
+    }
     if item["hasAudio"] == json!(true) {
         out["hasAudio"] = json!(true);
     }
@@ -213,7 +218,8 @@ mod tests {
         let view = json!({
             "project": {
                 "media": [{ "id": "m1", "name": "a.mp4", "kind": "video", "path": "/a.mp4",
-                            "duration": 12.5, "width": 1920, "height": 1080, "hasAudio": true }],
+                            "duration": 12.5, "width": 1920, "height": 1080, "hasAudio": true,
+                            "frameRate": 119.88 }],
                 "activeTimelineId": "tl2",
                 "timelines": [
                     { "id": "tl1", "name": "One", "tracks": [], "clips": [] },
@@ -256,5 +262,6 @@ mod tests {
             json!({ "id": "t2", "index": 1, "hidden": true, "muted": true })
         );
         assert_eq!(summary["media"][0]["hasAudio"], true);
+        assert_eq!(summary["media"][0]["frameRate"], 119.88);
     }
 }

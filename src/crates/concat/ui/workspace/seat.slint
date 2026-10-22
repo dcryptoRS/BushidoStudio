@@ -261,6 +261,15 @@ export component Seat inherits Rectangle {
             chain-set-colour(index, key, value) => { Editor.chain-set-colour(index, key, value); }
             curve-point(entry, key, point, x, y) => { Editor.curve-point(entry, key, point, x, y); }
             curve-remove(entry, key, point) => { Editor.curve-remove(entry, key, point); }
+            speed-ramp: Editor.speed-ramp;
+            speed-ramp-path: Editor.speed-ramp-path;
+            speed-ramp-points: Editor.speed-ramp-points;
+            speed-note: Editor.speed-note;
+            speed-smooth: Editor.speed-smooth;
+            speed-ramp-chosen(index) => { Editor.speed-ramp-chosen(index); }
+            speed-ramp-point(index, x, y) => { Editor.speed-ramp-point(index, x, y); }
+            speed-ramp-remove(index) => { Editor.speed-ramp-remove(index); }
+            speed-smooth-slow => { Editor.speed-smooth-slow(); }
             jump-token: Editor.inspector-jump-token;
             jump-tab: Editor.inspector-jump-tab;
             jump-section: Editor.inspector-jump-section;

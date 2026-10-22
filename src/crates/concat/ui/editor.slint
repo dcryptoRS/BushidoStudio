@@ -6,7 +6,7 @@ import {
     AppliedEntryData, AppliedParamData, CatalogueEntryData, ColourKnobData,
 } from "inspector/clip-inspector.slint";
 import {
-    CurveData, CurveGroupData, WheelData, WheelGroupData,
+    CurveData, CurveGroupData, CurvePointData, WheelData, WheelGroupData,
 } from "inspector/grading.slint";
 import { MediaFilter, MediaItemData, TextPresetData } from "workspace/media-pane.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
@@ -413,6 +413,20 @@ export global Editor {
     in-out property <int> scope-view;
     in-out property <bool> scopes-ready;
     callback scope-view-changed(view: int);
+    /// The Speed panel's ramp (Royalty Studio fork): which preset the
+    /// selected clip's speed curve is - 0 a constant rate, 1.. the presets,
+    /// -1 one drawn - the curve as the editor draws it and its points, what
+    /// is said about slow motion, and the slowest its file gives with no
+    /// frame repeated (0 when it gives none).
+    in-out property <int> speed-ramp;
+    in-out property <string> speed-ramp-path;
+    in-out property <[CurvePointData]> speed-ramp-points;
+    in-out property <string> speed-note;
+    in-out property <float> speed-smooth;
+    callback speed-ramp-chosen(index: int);
+    callback speed-ramp-point(index: int, x: float, y: float);
+    callback speed-ramp-remove(index: int);
+    callback speed-smooth-slow();
     /// The tray's record button: opens the voiceover panel, closes it, or
     /// stops the take it is running.
     callback record-voiceover();

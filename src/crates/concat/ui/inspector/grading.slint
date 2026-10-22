@@ -61,6 +61,9 @@ export struct CurveData {
     /// Across the colour wheel rather than black to white, resting flat in
     /// the middle (Royalty Studio fork): drawn over the hues it changes.
     hue: bool,
+    /// A clip's speed over its length (Royalty Studio fork): up is faster
+    /// on a log scale, the middle is as shot.
+    speed: bool,
 }
 
 /// One link's wheels, for a stack that draws a chain of links.
@@ -301,8 +304,10 @@ export component CurveEditor inherits VerticalLayout {
     callback remove(key: string, index: int);
 
     property <CurveData> active: root.curves[Math.min(root.current, root.curves.length - 1)];
-    // A curve across hues is drawn in the window's own ink, over the hues.
-    property <color> tint: root.active.hue ? Theme.fg : CurveTint.of(root.current);
+    // A curve across hues is drawn in the window's own ink, over the hues;
+    // a speed curve in the accent.
+    property <color> tint: root.active.speed ? Theme.accent
+        : root.active.hue ? Theme.fg : CurveTint.of(root.current);
 
     spacing: 6px;
     opacity: root.enabled ? 1.0 : 0.45;
@@ -344,11 +349,34 @@ export component CurveEditor inherits VerticalLayout {
             opacity: 0.2;
             background: @linear-gradient(90deg, #ff0000 0%, #ffff00 16.667%, #00ff00 33.333%, #00ffff 50%, #0000ff 66.667%, #ff00ff 83.333%, #ff0000 100%);
         }
-        if root.active.hue: Rectangle {
+        if root.active.hue || root.active.speed: Rectangle {
             y: parent.height / 2;
             width: parent.width;
             height: 1px;
             background: Theme.line-strong;
+        }
+        // A speed curve's scale: eight times as shot at the top, an eighth
+        // at the foot.
+        if root.active.speed: Text {
+            x: 4px;
+            y: 2px;
+            text: "8×";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+        }
+        if root.active.speed: Text {
+            x: 4px;
+            y: parent.height / 2 - self.height - 1px;
+            text: "1×";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+        }
+        if root.active.speed: Text {
+            x: 4px;
+            y: parent.height - self.height - 2px;
+            text: "⅛×";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
         }
 
         for step in 3: Rectangle {
@@ -387,7 +415,7 @@ export component CurveEditor inherits VerticalLayout {
             fit: fill;
             commands: curve.path;
             fill: Colors.transparent;
-            stroke: curve.hue ? Theme.fg : CurveTint.of(i);
+            stroke: curve.speed ? Theme.accent : curve.hue ? Theme.fg : CurveTint.of(i);
             stroke-width: i == root.current ? 2px : 1px;
             opacity: i == root.current ? 1 : 0.3;
         }
