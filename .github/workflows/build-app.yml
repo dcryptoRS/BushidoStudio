@@ -21,10 +21,13 @@ name: Build app
 #   FFmpeg - headers, import libraries and runtime libraries in one archive
 #   - serves, and its runtime libraries ship beside the binary, which
 #   carries an rpath to find them there.
-# - whisper.cpp runs on the GPU through Vulkan (the `vulkan` feature): any
-#   card with a Vulkan driver - NVIDIA, AMD, Intel - with nothing else
-#   installed, and the CPU where there is none. Building it needs the
-#   Vulkan headers and glslc.
+# - whisper.cpp runs on the GPU through Vulkan (the `vulkan` feature) on
+#   x86_64: any card with a Vulkan driver - NVIDIA, AMD, Intel - with
+#   nothing else installed, and the CPU where there is none. Building it
+#   needs Vulkan headers and glslc newer than Ubuntu 22.04 has (it has no
+#   glslc at all), so they come from LunarG's Vulkan SDK, pinned like the
+#   rest. LunarG makes no SDK for Linux on ARM, so aarch64 transcribes on
+#   the CPU.
 #
 # - Every bundle is launched before it is uploaded: `bushido-studio
 #   --version` and `--smoke` from the staged folder, on a machine with
@@ -91,6 +94,8 @@ jobs:
             nfpm: amd64
             appimage: x86_64
             ggml: variants
+            # Whisper on the GPU through Vulkan; see the header.
+            whisper: vulkan
           - platform: linux
             arch: aarch64
             os: ubuntu-22.04-arm
@@ -166,9 +171,10 @@ jobs:
 
       # ── Linux ──────────────────────────────────────────────────────────
       # Slint's Skia renderer links fontconfig and freetype; cpal links
-      # ALSA; bindgen needs libclang; whisper.cpp is built by cmake, its
-      # Vulkan backend with the Vulkan headers and glslc; the file dialogs
-      # link GTK.
+      # ALSA; bindgen needs libclang; whisper.cpp is built by cmake; the
+      # file dialogs link GTK. libvulkan-dev is the loader the build links
+      # whisper's Vulkan backend against (the program finds the system's
+      # at run time); its headers and glslc are the SDK's, below.
       - name: System libraries (Linux)
         if: matrix.platform == 'linux'
         run: |
@@ -176,7 +182,26 @@ jobs:
           sudo apt-get install -y \
             libfontconfig1-dev libfreetype6-dev libxkbcommon-dev libgl1-mesa-dev \
             libgtk-3-dev libasound2-dev libclang-dev cmake libxkbcommon-x11-0 \
-            libvulkan-dev glslc
+            libvulkan-dev
+
+      # The Vulkan headers and glslc whisper's Vulkan backend is built
+      # with: Ubuntu 22.04 has no glslc, and its headers predate the
+      # extensions ggml asks for. LunarG's SDK, built on 22.04, has both;
+      # only glslc, the headers and the loader are unpacked (the whole SDK
+      # is 1.6 GB). CMake finds them through VULKAN_SDK.
+      - name: Vulkan SDK (Linux x86_64)
+        if: matrix.platform == 'linux' && matrix.whisper == 'vulkan'
+        run: |
+          set -euo pipefail
+          scripts/ci/fetch.sh vulkan-sdk-linux-x86_64 vulkansdk.tar.xz
+          mkdir -p vulkansdk
+          # The archive's top folder is the version; the wildcards match
+          # the names before --strip-components takes it off.
+          tar -xJf vulkansdk.tar.xz -C vulkansdk --strip-components=1 \
+            --wildcards '*/x86_64/bin/glslc' '*/x86_64/include/*' '*/x86_64/lib/libvulkan.so*'
+          test -x vulkansdk/x86_64/bin/glslc
+          echo "VULKAN_SDK=$PWD/vulkansdk/x86_64" >> "$GITHUB_ENV"
+          echo "$PWD/vulkansdk/x86_64/bin" >> "$GITHUB_PATH"
 
       # Ubuntu's packaged FFmpeg is older than the 7 the engine needs.
       - name: FFmpeg development libraries (Linux)
@@ -277,7 +302,7 @@ jobs:
         working-directory: src
         run: |
           set -o pipefail
-          cargo build --profile app -p concat --features vulkan --target ${{ matrix.target }} 2>&1 | tee build.log
+          cargo build --profile app -p concat ${{ matrix.whisper == 'vulkan' && '--features vulkan' || '' }} --target ${{ matrix.target }} 2>&1 | tee build.log
 
       - name: Build log to the summary (failure only)
         if: failure()

@@ -47,6 +47,11 @@ appimagetool-aarch64         https://github.com/AppImage/appimagetool/releases/d
 appimage-runtime-x86_64      https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64                    2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 appimage-runtime-aarch64     https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-aarch64                   00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444
 
+# LunarG's Vulkan SDK, for the headers and glslc whisper's Vulkan backend
+# is built with on Linux x86_64 (Ubuntu 22.04 has no glslc). See the
+# "Vulkan SDK" step of build-app.yml; LunarG makes none for Linux on ARM.
+vulkan-sdk-linux-x86_64      https://sdk.lunarg.com/sdk/download/1.4.341.1/linux/vulkansdk-linux-x86_64-1.4.341.1.tar.xz   3bf0f762afb6c79bc6a9d9fb5998745ccff928800a29619b501ed9de7fd9789b
+
 # LLVM for Windows: libclang for bindgen, clang-cl on arm64, and
 # llvm-objdump for scripts/ci/isa-scan.sh.
 llvm-win64                   https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.0/LLVM-21.1.0-win64.exe            e751be8019b7500b100456c915b4b3c339d8d88b81b3aad49796d39f700e7ef3
