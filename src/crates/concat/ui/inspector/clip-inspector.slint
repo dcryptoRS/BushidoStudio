@@ -2424,14 +2424,27 @@ export component SpeedPanel inherits VerticalLayout {
                         I18n.t("speed.rampJump"), I18n.t("speed.rampFlashIn"),
                         I18n.t("speed.rampFlashOut"), I18n.t("speed.rampDrawn"),
                     ];
+                    // "Drawn" is what a curve put down by hand is called,
+                    // not one to pick: picked, the row goes back to what
+                    // the clip has.
                     changed(index) => {
                         if (index < 7) {
                             root.ramp-chosen(index);
+                        } else {
+                            self.current = self.wanted;
                         }
                     }
                 }
             }
             CurveEditor {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                // The section's title already names it, and a speed curve
+                // reads across, so it is half as tall as it is wide.
+                tabs: false;
+                aspect: 0.5;
+                own-points: root.ramp-points;
+                has-own-points: true;
                 curves: [{
                     entry: -1,
                     key: "speed",
@@ -2445,27 +2458,33 @@ export component SpeedPanel inherits VerticalLayout {
                 point(key, index, x, y) => { root.ramp-point(index, x, y); }
                 remove(key, index) => { root.ramp-remove(index); }
             }
-            Text {
-                text: I18n.t("speed.curveHint");
-                color: Theme.fg-dim;
-                font-size: Theme.fs-sm;
-                wrap: word-wrap;
-            }
+            VerticalLayout {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                spacing: Theme.gap;
 
-            // Slow motion with every frame its own, for a clip shot fast
-            // enough to give it.
-            if root.speed-note != "": Text {
-                text: root.speed-note;
-                color: Theme.fg-muted;
-                font-size: Theme.fs-sm;
-                wrap: word-wrap;
-            }
-            if root.smooth-speed > 0: HorizontalLayout {
-                alignment: start;
-                Button {
-                    label: I18n.t1("speed.smoothButton", Math.round(root.smooth-speed * 100));
-                    glyph: Glyph.clock;
-                    clicked => { root.smooth-slow(); }
+                Text {
+                    text: I18n.t("speed.curveHint");
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                // Slow motion with every frame its own, for a clip shot fast
+                // enough to give it.
+                if root.speed-note != "": Text {
+                    text: root.speed-note;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+                if root.smooth-speed > 0: HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        label: I18n.t1("speed.smoothButton", Math.round(root.smooth-speed * 100));
+                        glyph: Glyph.clock;
+                        clicked => { root.smooth-slow(); }
+                    }
                 }
             }
         }

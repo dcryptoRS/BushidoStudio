@@ -149,20 +149,7 @@ fn apply_one(
                     (source_covered / next).max(MIN_CLIP_DURATION),
                 )
                 | assign(&mut clip.speed_curve, None);
-            // Slowed down, the clip grows into what follows it: the rest of
-            // the lane moves along by the growth, as a freeze frame's does,
-            // rather than being covered.
-            let (track_id, start, duration) = (clip.track_id.clone(), clip.start, clip.duration);
-            let grow = start + duration - old_end;
-            if grow > 0.0 && !timeline.is_free(&track_id, start, duration, &[&clip_id]) {
-                for other in timeline.clips_where(|other| {
-                    other.id != clip_id
-                        && other.track_id == track_id
-                        && other.start >= old_end - crate::placement::TOUCH
-                }) {
-                    other.start += grow;
-                }
-            }
+            make_room(timeline, &clip_id, old_end);
             Ok(Outcome {
                 created_id: None,
                 applied,
@@ -351,6 +338,7 @@ fn apply_one(
             };
             let curve = curve.filter(|points| crate::speed::curve_of(points).is_some());
             let source_covered = clip.duration * clip.speed;
+            let old_end = clip.start + clip.duration;
             let mean = curve
                 .as_ref()
                 .map(|points| crate::speed::mean_of(points))
@@ -362,6 +350,9 @@ fn apply_one(
                     &mut clip.duration,
                     (source_covered / mean).max(MIN_CLIP_DURATION),
                 );
+            // A ramp slower on the whole than the clip was grows it, as a
+            // slower constant rate does (Royalty Studio fork).
+            make_room(timeline, &clip_id, old_end);
             Ok(Outcome {
                 created_id: None,
                 applied,
@@ -442,5 +433,41 @@ fn apply_one(
         }
 
         _ => unreachable!("commands::apply routes only this module's commands here"),
+    }
+}
+
+/// Slowed down, a clip grows into what follows it: the rest of the lane
+/// moves along by the growth, as a freeze frame's does, rather than being
+/// covered. Growth into a gap moves nothing. Sped up, a clip butted
+/// against the next one brings the rest of the lane back with it (Royalty
+/// Studio fork), so a ramp's point dragged down and back up leaves the lane
+/// as it found it; one with a gap after it leaves the gap. What follows is
+/// everything on the lane that starts after the clip does - not after
+/// where it ended, so a clip already overlapping it moves too rather than
+/// being left under it.
+fn make_room(timeline: &mut Timeline, clip_id: &str, old_end: f64) {
+    let Some(clip) = timeline.clip(clip_id) else {
+        return;
+    };
+    let (track_id, start, duration) = (clip.track_id.clone(), clip.start, clip.duration);
+    let change = start + duration - old_end;
+    let moves = if change > 0.0 {
+        !timeline.is_free(&track_id, start, duration, &[clip_id])
+    } else {
+        change < 0.0
+            && timeline.clips.iter().any(|other| {
+                other.id != clip_id
+                    && other.track_id == track_id
+                    && (other.start - old_end).abs() <= crate::placement::TOUCH
+            })
+    };
+    if moves {
+        for other in timeline.clips_where(|other| {
+            other.id != clip_id
+                && other.track_id == track_id
+                && other.start > start + crate::placement::TOUCH
+        }) {
+            other.start += change;
+        }
     }
 }

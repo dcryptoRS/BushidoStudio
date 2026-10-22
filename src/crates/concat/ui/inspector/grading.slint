@@ -298,6 +298,20 @@ export component CurveEditor inherits VerticalLayout {
     in property <[CurveData]> curves;
     in property <bool> enabled: true;
     in-out property <int> current: 0;
+    /// The row of tabs, one per curve; off where there is one curve and
+    /// the panel's title names it.
+    in property <bool> tabs: true;
+    /// The graph's height over its width: square for a grade, flatter
+    /// for a curve read across, like a clip's speed.
+    in property <float> aspect: 1;
+    /// The handles' points handed over on their own rather than read out
+    /// of the active curve (Royalty Studio fork). Slint drops a row's
+    /// update that lands while the list's own binding is waiting to be
+    /// read again - and a curve whose path is a literal makes that binding
+    /// wait on every step of a drag - so the moved point's handle was left
+    /// where the drag began. A model of its own keeps the binding still.
+    in property <[CurvePointData]> own-points;
+    in property <bool> has-own-points: false;
 
     /// A point moved, or put down when `index` is -1, in the unit square.
     callback point(key: string, index: int, x: float, y: float);
@@ -312,7 +326,7 @@ export component CurveEditor inherits VerticalLayout {
     spacing: 6px;
     opacity: root.enabled ? 1.0 : 0.45;
 
-    HorizontalLayout {
+    if root.tabs: HorizontalLayout {
         spacing: 2px;
 
         for curve[i] in root.curves: Rectangle {
@@ -336,7 +350,7 @@ export component CurveEditor inherits VerticalLayout {
     }
 
     graph := Rectangle {
-        height: self.width;
+        height: self.width * root.aspect;
         background: Theme.well;
         border-width: 1px;
         border-color: Theme.line;
@@ -420,7 +434,7 @@ export component CurveEditor inherits VerticalLayout {
             opacity: i == root.current ? 1 : 0.3;
         }
 
-        for point in root.active.points: CurvePoint {
+        for point in (root.has-own-points ? root.own-points : root.active.points): CurvePoint {
             px: point.x;
             py: point.y;
             plot-w: graph.width;

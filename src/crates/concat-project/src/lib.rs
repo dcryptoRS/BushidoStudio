@@ -803,6 +803,110 @@ mod tests {
         assert_eq!(start_of(&editor, &next[0]), 20.0);
     }
 
+    /// A ramp slower on the whole than the clip was grows it too, and a
+    /// constant rate set after the ramp still finds what follows: the
+    /// lane never ends with one clip over another (Royalty Studio fork).
+    #[test]
+    fn a_slow_ramp_moves_what_follows_it_and_so_does_a_rate_after_it() {
+        use crate::model::SpeedPoint;
+        let (mut editor, media_id, first) = fixture();
+        let video = editor.project().active().tracks[0].id.clone();
+        let next = lane(&mut editor, &media_id, &video, &[10.0]);
+        editor
+            .apply(Command::SetClipSpeedCurve {
+                clip_id: first.clone(),
+                curve: Some(vec![
+                    SpeedPoint {
+                        at: 0.0,
+                        speed: 1.0,
+                    },
+                    SpeedPoint {
+                        at: 0.5,
+                        speed: 0.5,
+                    },
+                    SpeedPoint {
+                        at: 1.0,
+                        speed: 1.0,
+                    },
+                ]),
+            })
+            .expect("ramps");
+        let end_of_first = {
+            let clip = editor.project().active().clip(&first).expect("first");
+            clip.start + clip.duration
+        };
+        assert!(end_of_first > 10.0, "the ramp slows the clip on the whole");
+        assert!(
+            (start_of(&editor, &next[0]) - end_of_first).abs() < 1e-9,
+            "what follows starts where the ramped clip now ends"
+        );
+
+        editor
+            .apply(Command::SetClipSpeed {
+                clip_id: first.clone(),
+                speed: 0.25,
+            })
+            .expect("retimes");
+        let clip = editor.project().active().clip(&first).expect("first");
+        assert!(
+            (start_of(&editor, &next[0]) - (clip.start + clip.duration)).abs() < 1e-9,
+            "a rate after the ramp moves what follows as well"
+        );
+    }
+
+    /// Dragged down and back up, a ramp leaves the lane as it found it:
+    /// sped up again, a clip butted against the next brings it back
+    /// (Royalty Studio fork).
+    #[test]
+    fn a_ramp_undone_by_hand_brings_what_follows_back() {
+        use crate::model::SpeedPoint;
+        let (mut editor, media_id, first) = fixture();
+        let video = editor.project().active().tracks[0].id.clone();
+        let next = lane(&mut editor, &media_id, &video, &[10.0, 20.0]);
+        let ramp = |middle: f64| {
+            Some(vec![
+                SpeedPoint {
+                    at: 0.0,
+                    speed: 1.0,
+                },
+                SpeedPoint {
+                    at: 0.5,
+                    speed: middle,
+                },
+                SpeedPoint {
+                    at: 1.0,
+                    speed: 1.0,
+                },
+            ])
+        };
+        for middle in [0.5, 0.25, 0.5, 1.0] {
+            editor
+                .apply(Command::SetClipSpeedCurve {
+                    clip_id: first.clone(),
+                    curve: ramp(middle),
+                })
+                .expect("ramps");
+        }
+        assert!((start_of(&editor, &next[0]) - 10.0).abs() < 1e-9);
+        assert!((start_of(&editor, &next[1]) - 20.0).abs() < 1e-9);
+    }
+
+    /// Sped up with a gap after it, a clip leaves the gap and what is
+    /// beyond it where it was.
+    #[test]
+    fn speeding_up_a_clip_with_room_after_it_moves_nothing() {
+        let (mut editor, media_id, first) = fixture();
+        let video = editor.project().active().tracks[0].id.clone();
+        let next = lane(&mut editor, &media_id, &video, &[12.0]);
+        editor
+            .apply(Command::SetClipSpeed {
+                clip_id: first,
+                speed: 2.0,
+            })
+            .expect("retimes");
+        assert_eq!(start_of(&editor, &next[0]), 12.0);
+    }
+
     // ── ripple delete: https://github.com/jub0t/Concat/issues/106 ──
 
     #[test]

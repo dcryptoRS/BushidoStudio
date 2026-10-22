@@ -677,6 +677,10 @@ pub struct Models {
     pub link_wheels: RefCell<HashMap<i32, Rc<VecModel<WheelData>>>>,
     pub link_curves: RefCell<HashMap<i32, Rc<VecModel<CurveData>>>>,
     pub curve_points: RefCell<HashMap<(i32, String), Rc<VecModel<CurvePointData>>>>,
+    /// The Speed panel's ramp points, kept the same way (Royalty Studio
+    /// fork): handed over fresh, a point being dragged was dropped after
+    /// its first step.
+    pub speed_points: Rc<VecModel<CurvePointData>>,
     /// The keyframe cluster's rows and the libraries' views: synced like
     /// the rest, since a model handed over fresh is unequal to the last by
     /// identity and re-evaluates every binding on it.
@@ -762,6 +766,7 @@ impl Models {
             link_wheels: RefCell::new(HashMap::new()),
             link_curves: RefCell::new(HashMap::new()),
             curve_points: RefCell::new(HashMap::new()),
+            speed_points: Rc::new(VecModel::default()),
             key_rows: Rc::new(VecModel::default()),
             key_editor_rows: Rc::new(VecModel::default()),
             key_marks: Rc::new(VecModel::default()),
@@ -9710,7 +9715,7 @@ impl Studio {
         // The Claude pane's note follows the project that is open.
         crate::claude::publish(self, app);
         editor.set_selected_clip(selected);
-        self.publish_speed(&editor);
+        self.publish_speed(&editor, models);
         editor.set_selected_transition(self.selected_transition_data());
         // The background and Fit and Fill, on their own global: the Details
         // panel, the Video panel and the phone all read it.

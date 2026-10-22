@@ -63,9 +63,15 @@ And the copy is smaller than the published crate: ggml's GPU backends that
 no build of Concat compiles (CANN, CUDA, Hexagon, HIP, MUSA, OpenCL, RPC,
 SYCL, Vulkan, WebGPU, zDNN, ZenDNN) are left out of
 `whisper.cpp/ggml/src`, so the crate's `cuda`, `hipblas`, `vulkan` and
-`intel-sycl` features no longer build. Royalty Studio fork: `ggml-cuda` is back,
-  from the published whisper-rs-sys 0.15.0 (the same whisper.cpp 1.8.3), so
-  the `cuda` feature builds again: Whisper runs on an NVIDIA card. CMake only enters a backend's folder
-when that backend is turned on. `Cargo.lock` and the crate's registry
+`intel-sycl` features no longer build. Royalty Studio fork: `ggml-cuda` and
+`ggml-vulkan` are back, from the published whisper-rs-sys 0.15.0 (the same
+whisper.cpp 1.8.3, sha256 6986c0fe…f2a56f as crates.io's index has it), so
+the `cuda` and `vulkan` features build again: Whisper runs on an NVIDIA card
+through CUDA, and on any card with a Vulkan driver through Vulkan - the
+one the Linux release is built with. CMake only enters a backend's folder
+when that backend is turned on. The build script copies `whisper.cpp` into
+its `OUT_DIR` once and builds that copy from then on, so after a change to
+the sources here delete `target/*/build/whisper-rs-sys-*/out/whisper.cpp`
+(or the whole `target`), or the build goes on with the old ones. `Cargo.lock` and the crate's registry
 metadata files are left out too. Nothing else differs from the published
 crate.

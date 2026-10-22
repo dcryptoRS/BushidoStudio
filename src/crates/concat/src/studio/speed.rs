@@ -18,10 +18,12 @@
 //! own, which is what real slow motion is; the panel says how far a clip
 //! goes and puts it there in one click.
 
+use std::rc::Rc;
+
 use concat_project::Command;
 use concat_project::model::{Clip, SpeedPoint, ranges};
 
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{ModelRc, SharedString};
 
 use super::Studio;
 use crate::i18n::tf;
@@ -133,19 +135,24 @@ impl Studio {
     /// The Speed panel's ramp and slow motion for the selected clip, onto
     /// the editor: the constant rate's level line and nothing said when no
     /// one clip is selected.
-    pub(super) fn publish_speed(&self, editor: &crate::ui::Editor) {
+    pub(super) fn publish_speed(&self, editor: &crate::ui::Editor, models: &super::Models) {
+        // One model for the points, synced: a fresh one each time would
+        // rebuild the handles under a drag and drop it.
+        editor.set_speed_ramp_points(ModelRc::from(Rc::clone(&models.speed_points)));
         let clip = self.sole_selection().and_then(|id| self.clip(&id).cloned());
         let Some(clip) = clip else {
             editor.set_speed_ramp(0);
             editor.set_speed_ramp_path(SharedString::default());
-            editor.set_speed_ramp_points(ModelRc::default());
+            super::sync(&models.speed_points, Vec::new());
             editor.set_speed_note(SharedString::default());
             editor.set_speed_smooth(0.0);
             return;
         };
+        // The points before the path, so the handles take their rows
+        // before the curve they sit on changes.
+        super::sync(&models.speed_points, ramp_points(&clip));
         editor.set_speed_ramp(preset_of(clip.speed_curve.as_deref()));
         editor.set_speed_ramp_path(ramp_path(&clip).into());
-        editor.set_speed_ramp_points(ModelRc::new(VecModel::from(ramp_points(&clip))));
         editor.set_speed_note(self.smooth_note(&clip).into());
         // The button shows while the clip is not there already.
         let smooth = self
@@ -275,7 +282,8 @@ impl Studio {
         });
     }
 
-    /// A point of the drawn ramp taken off; the ends stay.
+    /// A point of the drawn ramp taken off; the ends stay. What is left
+    /// level is a constant rate again, and the row says so.
     pub fn ramp_remove(&mut self, point: i32) {
         let Some(id) = self.sole_selection() else {
             return;
@@ -288,6 +296,14 @@ impl Studio {
                 points.remove(index);
             }
             _ => return,
+        }
+        let speed = points[0].speed;
+        if points
+            .iter()
+            .all(|point| (point.speed - speed).abs() < 1e-6)
+        {
+            self.apply(Command::SetClipSpeed { clip_id: id, speed });
+            return;
         }
         self.apply(Command::SetClipSpeedCurve {
             clip_id: id,

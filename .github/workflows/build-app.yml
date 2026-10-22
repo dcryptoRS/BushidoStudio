@@ -322,9 +322,9 @@ jobs:
             # And the Vulkan backend's, which ggml loads beside them when
             # the machine has a driver for it.
             cp -a "$out"/bin/libggml-vulkan.so "stage/$name/lib/"
-            for module in x64 sandybridge haswell vulkan; do
-              test -f "stage/$name/lib/libggml-cpu-$module.so" \
-                || { echo "libggml-cpu-$module.so is missing from the build" >&2; exit 1; }
+            for module in cpu-x64 cpu-sandybridge cpu-haswell vulkan; do
+              test -f "stage/$name/lib/libggml-$module.so" \
+                || { echo "libggml-$module.so is missing from the build" >&2; exit 1; }
             done
           fi
           cp assets/brand/bushido-studio-256.png "stage/$name/bushido-studio.png"

@@ -126,6 +126,8 @@
           pkg-config
           cmake
           rustPlatform.bindgenHook
+          # glslc, which compiles whisper's Vulkan shaders at build time.
+          shaderc
         ];
 
       buildInputs =
@@ -142,6 +144,10 @@
           libxkbcommon
           wayland
           openssl
+          # Whisper's Vulkan backend: the headers to build it, the loader
+          # to link it.
+          vulkan-headers
+          vulkan-loader
         ];
     in
     {
@@ -163,6 +169,9 @@
             "-p"
             "concat"
           ];
+          # Transcription on the GPU through Vulkan, on any card with a
+          # driver for it, as the other Linux packages (build-app.yml).
+          buildFeatures = [ "vulkan" ];
 
           # The workspace's tests generate their own media through the
           # linked encoder and run anywhere the engine builds, but they take
