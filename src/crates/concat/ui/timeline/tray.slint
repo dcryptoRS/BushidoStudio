@@ -285,7 +285,7 @@ export component TimelineTray inherits Rectangle {
         // a clip slipped inside itself, a clip slid between its neighbours.
         TrayButton {
             glyph: Glyph.roll;
-            label: I18n.t("shortcuts.rollTool");
+            label: I18n.t("tray.rollToolHint");
             icon-size: 16px;
             checked: root.tool == TimelineTool.roll;
             clicked => {

@@ -1022,6 +1022,7 @@ impl SettingsPane {
                 .into()
             },
             version: env!("CARGO_PKG_VERSION").into(),
+            based_on: concat_host::dirs::BASED_ON.into(),
             update_status: self.update_status.as_str().into(),
             checking: self.checking,
             version_choice: self.version_choice as i32,

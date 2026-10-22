@@ -34,7 +34,10 @@ of the action (4%). Give up the bottom of the list before the top.
   in talking-head and short-form content.
 - J-cut: the sound of the next shot starts before its picture. L-cut: the
   sound of a shot runs on under the next picture. Both make dialogue and
-  scene changes feel natural; build them with unlinked picture and sound.
+  scene changes feel natural. Build one without unlinking: roll the cut on
+  the sound lane alone - `edit_apply` with `{"op": "scoped", "scope":
+  {"alone": true}, "command": {"op": "rollEdit", ...}}` naming the two sound
+  clips; about 8 to 12 frames is where to start.
 - Match cut: join shots that share a shape, movement or idea. Smash cut:
   an abrupt cut against expectation, for comedy or shock.
 - Transitions say something: a dissolve connects and suggests time passing;
@@ -118,8 +121,11 @@ pane (waveform, RGB parade, vectorscope, histogram).
 In this editor: the color wheels (lift, gamma, gain), curves, white
 balance, exposure, saturation and vibrance effects; the HSL Qualifier for
 secondaries (pick a hue, saturation and brightness range, then correct only
-that, with its matte to check); the Color Mixer for hue-by-hue turns,
-saturation and luminance (the hue curves); Broadcast Safe last, to hold
+that, with its matte to check); Hue Curves (`concat.hue-curves`: Hue vs
+Hue, Hue vs Sat, Hue vs Lum, each curve flat at 0.5 as shot, points
+`<curve>.<n>.x` round the wheel from red at 0 and `.y` up or down) for a
+precise pull on one hue, and the Color Mixer for the same with eight
+sliders; Broadcast Safe last, to hold
 legal levels for delivery; LUTs imported as looks; adjustment layers to
 grade everything beneath them; masks to isolate.
 
@@ -141,8 +147,12 @@ grade everything beneath them; masks to isolate.
   at or below −1 dBTP; broadcast usually asks for −23 LUFS. `export_start`
   takes `"loudness": -14` and measures the mix by EBU R128 and normalises
   it, its peaks limited.
-- A picture and its sound are linked; to build J- and L-cuts or to keep a
-  sound alone, unlink them first.
+- A picture and its sound are linked; a command scoped `alone` (above)
+  touches the clips it names and not their partners, which is how a J or
+  an L cut is made and a sound is kept on its own.
+- Every export with a loudness is measured again after the encoder, true
+  peak included, and made again with the limiter lower if a peak between
+  the samples still went over −1 dBTP.
 
 ## Short-form (reels, TikTok, Shorts)
 

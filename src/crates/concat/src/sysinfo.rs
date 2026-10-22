@@ -81,9 +81,10 @@ pub fn system_facts() -> Vec<(String, String)> {
         (
             t("sysinfo.application"),
             format!(
-                "{} {}",
+                "{} {} (Concat {})",
                 concat_host::dirs::PRODUCT,
-                env!("CARGO_PKG_VERSION")
+                env!("CARGO_PKG_VERSION"),
+                concat_host::dirs::BASED_ON
             ),
         ),
         (

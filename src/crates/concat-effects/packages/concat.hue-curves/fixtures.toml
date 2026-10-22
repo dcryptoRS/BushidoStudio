@@ -1,0 +1,58 @@
+# Hue curves on the display level (Royalty Studio fork); probes in light,
+# the effect between the display's gamma and back. Flat, nothing
+# changes; red's saturation taken off greys a red to its own luma and leaves
+# a green as it was; a twelfth of a turn takes a red to orange with its value
+# kept; a grey takes no curve; an orange past white is carried on past it.
+
+[[probe]]
+name = "default"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.3, 0.2, 0.12, 1]
+
+[[probe]]
+name = "minimum"
+at = "min"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.3, 0.2, 0.12, 1]
+
+[[probe]]
+name = "maximum"
+at = "max"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.3, 0.2, 0.12, 1]
+
+[[probe]]
+name = "red without saturation is its own grey"
+params = { "hue_sat.0.x" = 0.000000, "hue_sat.0.y" = 0.0, "hue_sat.1.x" = 0.166667, "hue_sat.1.y" = 0.5, "hue_sat.2.x" = 0.333333, "hue_sat.2.y" = 0.5, "hue_sat.3.x" = 0.500000, "hue_sat.3.y" = 0.5, "hue_sat.4.x" = 0.666667, "hue_sat.4.y" = 0.5, "hue_sat.5.x" = 0.833333, "hue_sat.5.y" = 0.5 }
+input = [0.58535, 0.003981, 0.003981, 1]
+expect = [0.035491, 0.035491, 0.035491, 1]
+
+[[probe]]
+name = "a green keeps its colour when red changes"
+params = { "hue_sat.0.x" = 0.000000, "hue_sat.0.y" = 0.0, "hue_sat.1.x" = 0.166667, "hue_sat.1.y" = 0.5, "hue_sat.2.x" = 0.333333, "hue_sat.2.y" = 0.5, "hue_sat.3.x" = 0.500000, "hue_sat.3.y" = 0.5, "hue_sat.4.x" = 0.666667, "hue_sat.4.y" = 0.5, "hue_sat.5.x" = 0.833333, "hue_sat.5.y" = 0.5, "hue_hue.0.x" = 0.000000, "hue_hue.0.y" = 0.6, "hue_hue.1.x" = 0.166667, "hue_hue.1.y" = 0.5, "hue_hue.2.x" = 0.333333, "hue_hue.2.y" = 0.5, "hue_hue.3.x" = 0.500000, "hue_hue.3.y" = 0.5, "hue_hue.4.x" = 0.666667, "hue_hue.4.y" = 0.5, "hue_hue.5.x" = 0.833333, "hue_hue.5.y" = 0.5 }
+input = [0.003981, 0.42485, 0.021012, 1]
+expect = [0.003981, 0.42485, 0.021012, 1]
+
+[[probe]]
+name = "red turned a twelfth of the wheel is orange"
+params = { "hue_hue.0.x" = 0.000000, "hue_hue.0.y" = 0.583333, "hue_hue.1.x" = 0.166667, "hue_hue.1.y" = 0.5, "hue_hue.2.x" = 0.333333, "hue_hue.2.y" = 0.5, "hue_hue.3.x" = 0.500000, "hue_hue.3.y" = 0.5, "hue_hue.4.x" = 0.666667, "hue_hue.4.y" = 0.5, "hue_hue.5.x" = 0.833333, "hue_hue.5.y" = 0.5 }
+input = [0.58535, 0.003981, 0.003981, 1]
+expect = [0.58535, 0.147133, 0.003981, 1]
+
+[[probe]]
+name = "a grey takes no curve"
+params = { "hue_hue.0.x" = 0.000000, "hue_hue.0.y" = 0.9, "hue_hue.1.x" = 0.166667, "hue_hue.1.y" = 0.5, "hue_hue.2.x" = 0.333333, "hue_hue.2.y" = 0.5, "hue_hue.3.x" = 0.500000, "hue_hue.3.y" = 0.5, "hue_hue.4.x" = 0.666667, "hue_hue.4.y" = 0.5, "hue_hue.5.x" = 0.833333, "hue_hue.5.y" = 0.5, "hue_sat.0.x" = 0.000000, "hue_sat.0.y" = 1.0, "hue_sat.1.x" = 0.166667, "hue_sat.1.y" = 0.5, "hue_sat.2.x" = 0.333333, "hue_sat.2.y" = 0.5, "hue_sat.3.x" = 0.500000, "hue_sat.3.y" = 0.5, "hue_sat.4.x" = 0.666667, "hue_sat.4.y" = 0.5, "hue_sat.5.x" = 0.833333, "hue_sat.5.y" = 0.5, "hue_lum.0.x" = 0.000000, "hue_lum.0.y" = 1.0, "hue_lum.1.x" = 0.166667, "hue_lum.1.y" = 0.5, "hue_lum.2.x" = 0.333333, "hue_lum.2.y" = 0.5, "hue_lum.3.x" = 0.500000, "hue_lum.3.y" = 0.5, "hue_lum.4.x" = 0.666667, "hue_lum.4.y" = 0.5, "hue_lum.5.x" = 0.833333, "hue_lum.5.y" = 0.5 }
+input = [0.2, 0.2, 0.2, 1]
+expect = [0.2, 0.2, 0.2, 1]
+
+[[probe]]
+name = "red about a stop of light brighter"
+params = { "hue_lum.0.x" = 0.000000, "hue_lum.0.y" = 1.0, "hue_lum.1.x" = 0.166667, "hue_lum.1.y" = 0.5, "hue_lum.2.x" = 0.333333, "hue_lum.2.y" = 0.5, "hue_lum.3.x" = 0.500000, "hue_lum.3.y" = 0.5, "hue_lum.4.x" = 0.666667, "hue_lum.4.y" = 0.5, "hue_lum.5.x" = 0.833333, "hue_lum.5.y" = 0.5 }
+input = [0.58535, 0.003981, 0.003981, 1]
+expect = [1.344781, 0.009146, 0.009146, 1]
+
+[[probe]]
+name = "an orange past white is carried on"
+params = { "hue_lum.0.x" = 0.000000, "hue_lum.0.y" = 1.0, "hue_lum.1.x" = 0.166667, "hue_lum.1.y" = 0.5, "hue_lum.2.x" = 0.333333, "hue_lum.2.y" = 0.5, "hue_lum.3.x" = 0.500000, "hue_lum.3.y" = 0.5, "hue_lum.4.x" = 0.666667, "hue_lum.4.y" = 0.5, "hue_lum.5.x" = 0.833333, "hue_lum.5.y" = 0.5 }
+input = [4.0, 2.0, 1.0, 1]
+expect = [6.921608, 3.460804, 1.730402, 1]

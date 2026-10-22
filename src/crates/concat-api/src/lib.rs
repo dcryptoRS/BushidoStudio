@@ -55,6 +55,11 @@ use concat_project::commands::NewMedia;
 use concat_project::model::{MediaOrigin, Motion, VideoSettings};
 pub use live::{Live, LiveJob};
 
+/// The Concat release this is built on (Royalty Studio fork): the version
+/// a client made for Concat is told it is talking to, in the `concat`
+/// field of a version answer and of the server's listing.
+pub const CONCAT_VERSION: &str = concat_host::dirs::BASED_ON;
+
 pub use message::{
     API_VERSION, ApiError, Dirs, Done, ErrorCode, Event, ExportSpec, Fill, JobState, JobStatus,
     PackageInfo, ParamInfo, Picture, Reply, Request, Response, Started, VersionInfo, Written,
@@ -549,7 +554,9 @@ impl Api {
     pub fn version(&self) -> VersionInfo {
         VersionInfo {
             api_version: API_VERSION.to_owned(),
-            concat: env!("CARGO_PKG_VERSION").to_owned(),
+            // The Concat release this is built on (Royalty Studio fork):
+            // what a client made for Concat checks against.
+            concat: CONCAT_VERSION.to_owned(),
             dirs: Dirs::from(&self.dirs),
             capabilities: {
                 let mut capabilities = self.capabilities.clone();

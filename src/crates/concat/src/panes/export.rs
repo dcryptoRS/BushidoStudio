@@ -43,6 +43,8 @@ pub enum ExportMsg {
     /// A delivery preset picked, by its row of [`PRESETS`] (Royalty Studio
     /// fork).
     PresetChosen(i32),
+    /// A vertical copy of the timeline asked for (Royalty Studio fork).
+    MakeVertical,
     /// A loudness picked, by its row of [`LOUDNESS`].
     LoudnessChanged(i32),
     /// Back to the form after a finished or failed render.
@@ -173,6 +175,12 @@ impl ExportPane {
                 self.preset = 0;
             }
             ExportMsg::PresetChosen(index) => self.choose_preset(studio, index),
+            // A vertical copy of the edit, for a vertical preset on a
+            // horizontal timeline: the sheet closes while it is worked out.
+            ExportMsg::MakeVertical => {
+                self.open = false;
+                studio.reframe_vertical();
+            }
             ExportMsg::LoudnessChanged(index) => {
                 self.loudness = (index.max(0) as usize).min(LOUDNESS.len() - 1);
                 self.preset = 0;

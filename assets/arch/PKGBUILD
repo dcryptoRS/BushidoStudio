@@ -1,29 +1,32 @@
-# Maintainer: noxygalaxy <noxycraftyt@gmail.com>
-pkgname=concat
-pkgver=${CONCAT_VERSION:?CONCAT_VERSION must be set}
+# Maintainer: Royalty Studio <maintainer@royalty-studio.invalid>
+# Bushido Studio, a modified Concat (Royalty Studio fork). Concat's own
+# package was maintained by noxygalaxy; this one is Royalty Studio's.
+pkgname=bushido-studio
+pkgver=${BUSHIDO_VERSION:?BUSHIDO_VERSION must be set}
 pkgrel=1
-pkgdesc="Free and open source video editor"
+pkgdesc="Video editor for reels and film, based on Concat"
 arch=('x86_64' 'aarch64')
+# Concat's page until Bushido Studio has a repository of its own.
 url="https://github.com/jub0t/Concat"
 license=('AGPL-3.0-or-later')
-depends=('glibc' 'gtk3' 'fontconfig' 'freetype2' 'libxkbcommon' 'mesa' 'alsa-lib')
+depends=('glibc' 'gtk3' 'fontconfig' 'freetype2' 'libxkbcommon' 'mesa' 'vulkan-icd-loader' 'alsa-lib')
 options=('!strip' '!debug')
 source=()
 
-stage=${CONCAT_STAGE:?CONCAT_STAGE must point at the staged folder}
+stage=${BUSHIDO_STAGE:?BUSHIDO_STAGE must point at the staged folder}
 
 package() {
-  install -Dm755 "$stage/concat" "$pkgdir/opt/concat/concat"
-  install -d "$pkgdir/opt/concat/lib"
-  cp -a "$stage"/lib/. "$pkgdir/opt/concat/lib/"
+  install -Dm755 "$stage/bushido-studio" "$pkgdir/opt/bushido-studio/bushido-studio"
+  install -d "$pkgdir/opt/bushido-studio/lib"
+  cp -a "$stage"/lib/. "$pkgdir/opt/bushido-studio/lib/"
 
   install -d "$pkgdir/usr/bin"
-  printf '#!/bin/sh\nexec /opt/concat/concat "$@"\n' > "$pkgdir/usr/bin/concat"
-  chmod 755 "$pkgdir/usr/bin/concat"
-  install -Dm644 "$stage/concat.desktop" "$pkgdir/usr/share/applications/concat.desktop"
-  sed -i 's|^Exec=concat|Exec=/opt/concat/concat %U|' "$pkgdir/usr/share/applications/concat.desktop"
-  install -Dm644 "$stage/concat.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/concat.png"
+  printf '#!/bin/sh\nexec /opt/bushido-studio/bushido-studio "$@"\n' > "$pkgdir/usr/bin/bushido-studio"
+  chmod 755 "$pkgdir/usr/bin/bushido-studio"
+  install -Dm644 "$stage/bushido-studio.desktop" "$pkgdir/usr/share/applications/bushido-studio.desktop"
+  sed -i 's|^Exec=bushido-studio|Exec=/opt/bushido-studio/bushido-studio %U|' "$pkgdir/usr/share/applications/bushido-studio.desktop"
+  install -Dm644 "$stage/bushido-studio.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/bushido-studio.png"
 
-  install -Dm644 "$stage/LICENSE" "$pkgdir/usr/share/licenses/concat/LICENSE"
-  install -Dm644 "$stage/THIRD_PARTY_NOTICES.md" "$pkgdir/usr/share/licenses/concat/THIRD_PARTY_NOTICES.md"
+  install -Dm644 "$stage/LICENSE" "$pkgdir/usr/share/licenses/bushido-studio/LICENSE"
+  install -Dm644 "$stage/THIRD_PARTY_NOTICES.md" "$pkgdir/usr/share/licenses/bushido-studio/THIRD_PARTY_NOTICES.md"
 }

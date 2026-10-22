@@ -28,6 +28,31 @@ pub const IDENTIFIER: &str = "studio.bushido.editor";
 /// The name the program goes by in the window, the menus and its messages.
 pub const PRODUCT: &str = "Bushido Studio";
 
+/// The Concat release Bushido Studio is built on (Royalty Studio fork):
+/// what the About page credits, and the version a client made for Concat,
+/// such as the phone's remote or a host asking over MCP, is told it is
+/// talking to, so everything that works with that release works with this
+/// one. Bushido Studio's own number is the package's, counted from 0.1.0.
+pub const BASED_ON: &str = "0.2.8";
+
+/// Where Bushido Studio is published, as GitHub's `owner/name`: none until
+/// it is (Royalty Studio fork). The one line everything that leads to its
+/// releases reads - the updater, the links, the packages' homepage; while
+/// it is empty the updater stays off and the links lead to Concat.
+pub const REPOSITORY: Option<&str> = None;
+
+/// The name the Linux packages install under - the .deb's, the .rpm's,
+/// pacman's - and the program's on the path (Royalty Studio fork).
+pub const PACKAGE: &str = "bushido-studio";
+
+/// Concat's own repository, which this is a fork of.
+pub const UPSTREAM: &str = "jub0t/Concat";
+
+/// The repository's page: Bushido Studio's once it has one, Concat's until.
+pub fn repository_url() -> String {
+    format!("https://github.com/{}", REPOSITORY.unwrap_or(UPSTREAM))
+}
+
 /// Concat's identifier, whose folders the first run takes over from: see
 /// [`adopt_legacy`]. Bushido Studio is a modified Concat, and someone
 /// moving from it keeps their settings, keys and models.

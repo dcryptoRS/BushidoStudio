@@ -58,6 +58,9 @@ export struct CurveData {
     /// The curve as the shader works it out, in a unit box, y downwards:
     /// path commands.
     path: string,
+    /// Across the colour wheel rather than black to white, resting flat in
+    /// the middle (Royalty Studio fork): drawn over the hues it changes.
+    hue: bool,
 }
 
 /// One link's wheels, for a stack that draws a chain of links.
@@ -298,7 +301,8 @@ export component CurveEditor inherits VerticalLayout {
     callback remove(key: string, index: int);
 
     property <CurveData> active: root.curves[Math.min(root.current, root.curves.length - 1)];
-    property <color> tint: CurveTint.of(root.current);
+    // A curve across hues is drawn in the window's own ink, over the hues.
+    property <color> tint: root.active.hue ? Theme.fg : CurveTint.of(root.current);
 
     spacing: 6px;
     opacity: root.enabled ? 1.0 : 0.45;
@@ -332,6 +336,20 @@ export component CurveEditor inherits VerticalLayout {
         border-width: 1px;
         border-color: Theme.line;
         border-radius: Theme.r-xs;
+
+        // Across hues: the wheel laid out under the curve, red to red, and
+        // the middle - as shot - drawn firmer than the rest of the grid.
+        if root.active.hue: Rectangle {
+            border-radius: Theme.r-xs;
+            opacity: 0.2;
+            background: @linear-gradient(90deg, #ff0000 0%, #ffff00 16.667%, #00ff00 33.333%, #00ffff 50%, #0000ff 66.667%, #ff00ff 83.333%, #ff0000 100%);
+        }
+        if root.active.hue: Rectangle {
+            y: parent.height / 2;
+            width: parent.width;
+            height: 1px;
+            background: Theme.line-strong;
+        }
 
         for step in 3: Rectangle {
             x: (step + 1) * parent.width / 4;
@@ -369,7 +387,7 @@ export component CurveEditor inherits VerticalLayout {
             fit: fill;
             commands: curve.path;
             fill: Colors.transparent;
-            stroke: CurveTint.of(i);
+            stroke: curve.hue ? Theme.fg : CurveTint.of(i);
             stroke-width: i == root.current ? 2px : 1px;
             opacity: i == root.current ? 1 : 0.3;
         }

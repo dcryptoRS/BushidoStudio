@@ -96,6 +96,20 @@ impl Scope {
     }
 }
 
+/// Where a picture's subject is as it plays, for
+/// [`Command::ReframeTimeline`] (Royalty Studio fork).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Follow {
+    /// The clip, on the timeline being copied.
+    pub clip_id: String,
+    /// `[at, x]` pairs: `at` a fraction of the clip's length, `x` where
+    /// the subject is across the picture - its crop's part of it - with 0
+    /// its left edge and 1 its right.
+    pub points: Vec<[f64; 2]>,
+}
+
 /// Where one clip is going, in a multi-clip move.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -976,6 +990,25 @@ pub enum Command {
         /// The frame and the rate, together.
         video: VideoSettings,
     },
+    /// A copy of a timeline at another frame (Royalty Studio fork): a
+    /// vertical cut of a horizontal edit, for the phone. Every lane, clip,
+    /// link and marker is copied under new ids; each picture is scaled to
+    /// cover the new frame rather than fit inside it, and moved across it
+    /// to keep its subject in view where `follow` says where that is -
+    /// centred where it says nothing. Mints a "tl" id and makes the copy
+    /// active. An unknown timeline or a frame no frame could have is a
+    /// no-op.
+    ReframeTimeline {
+        /// The timeline copied.
+        timeline_id: String,
+        /// The copy's tab label.
+        name: String,
+        /// The copy's frame and rate.
+        video: VideoSettings,
+        /// Where each picture's subject is as it plays.
+        #[serde(default)]
+        follow: Vec<Follow>,
+    },
     /// Sets what fills a timeline's frame behind the pictures on its lowest
     /// picture lane; see `Timeline::background_of`. Tidied first: an amount
     /// held to `0..=1`, a colour that does not read made black.
@@ -1258,6 +1291,9 @@ impl Command {
                 ..
             } => bad(ranges.iter().flatten().copied()) || bad([*depth, *attack, *release]),
             Command::UpdateMarker { time, .. } => bad(*time),
+            Command::ReframeTimeline { follow, .. } => bad(follow
+                .iter()
+                .flat_map(|path| path.points.iter().flatten().copied())),
             Command::AddMedia { item }
             | Command::FillSlot { item, .. }
             | Command::ReplaceMotion { item, .. }
@@ -1531,6 +1567,7 @@ fn apply_in(
         | Command::RemoveTrack { .. }
         | Command::SetTrackFlag { .. }) => tracks::apply(project, mint, command),
         command @ (Command::AddTimeline
+        | Command::ReframeTimeline { .. }
         | Command::SetTimelineVideo { .. }
         | Command::SetTimelineBackground { .. }
         | Command::RemoveTimeline { .. }

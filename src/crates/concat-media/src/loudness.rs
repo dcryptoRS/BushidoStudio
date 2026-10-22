@@ -12,6 +12,11 @@
 //! summed, and the blocks gated twice - below -70 LUFS is silence, and below
 //! ten units under the loudness of what is left is too quiet to count -
 //! before the rest are averaged into one figure.
+//!
+//! The true peak, as Annex 2 has it: each channel interpolated to four
+//! times its rate by the recommendation's own 48-tap filter, and the
+//! highest of those - a peak between two samples, which the samples alone
+//! do not show and a decoder or a speaker will.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,6 +35,9 @@ pub struct Loudness {
     pub integrated: f64,
     /// The highest sample, in dBFS; negative infinity for silence.
     pub peak: f64,
+    /// The highest point of the waveform between the samples as well, in
+    /// dBTP: never under `peak`; negative infinity for silence.
+    pub true_peak: f64,
 }
 
 /// One second-order section, in transposed direct form II.
@@ -71,16 +79,103 @@ fn k_weighting() -> [Biquad; 2] {
     ]
 }
 
+/// BS.1770-4 Annex 2's interpolating filter: four phases of twelve taps,
+/// each one the waveform a quarter of a sample further on.
+const TRUE_PEAK_PHASES: [[f64; 12]; 4] = [
+    [
+        0.001_708_984_375,
+        0.010_986_328_125,
+        -0.019_653_320_312_5,
+        0.033_203_125,
+        -0.059_448_242_187_5,
+        0.137_329_101_562_5,
+        0.972_167_968_75,
+        -0.102_294_921_875,
+        0.047_607_421_875,
+        -0.026_611_328_125,
+        0.014_892_578_125,
+        -0.008_300_781_25,
+    ],
+    [
+        -0.029_174_804_687_5,
+        0.029_296_875,
+        -0.051_757_812_5,
+        0.089_111_328_125,
+        -0.166_503_906_25,
+        0.465_087_890_625,
+        0.779_785_156_25,
+        -0.200_317_382_812_5,
+        0.101_562_5,
+        -0.058_227_539_062_5,
+        0.033_081_054_687_5,
+        -0.018_920_898_437_5,
+    ],
+    [
+        -0.018_920_898_437_5,
+        0.033_081_054_687_5,
+        -0.058_227_539_062_5,
+        0.101_562_5,
+        -0.200_317_382_812_5,
+        0.779_785_156_25,
+        0.465_087_890_625,
+        -0.166_503_906_25,
+        0.089_111_328_125,
+        -0.051_757_812_5,
+        0.029_296_875,
+        -0.029_174_804_687_5,
+    ],
+    [
+        -0.008_300_781_25,
+        0.014_892_578_125,
+        -0.026_611_328_125,
+        0.047_607_421_875,
+        -0.102_294_921_875,
+        0.137_329_101_562_5,
+        0.972_167_968_75,
+        -0.059_448_242_187_5,
+        0.033_203_125,
+        -0.019_653_320_312_5,
+        0.010_986_328_125,
+        0.001_708_984_375,
+    ],
+];
+
+/// One channel's last twelve samples, newest first, for the interpolator.
+#[derive(Clone, Copy, Default)]
+struct History {
+    samples: [f64; 12],
+}
+
+impl History {
+    /// `x` taken in; the highest the four interpolated points reach.
+    fn push(&mut self, x: f64) -> f64 {
+        self.samples.copy_within(0..11, 1);
+        self.samples[0] = x;
+        TRUE_PEAK_PHASES
+            .iter()
+            .map(|taps| {
+                taps.iter()
+                    .zip(&self.samples)
+                    .map(|(tap, sample)| tap * sample)
+                    .sum::<f64>()
+                    .abs()
+            })
+            .fold(0.0, f64::max)
+    }
+}
+
 /// A running measure: samples pushed in, the figures taken at the end.
 pub struct Meter {
     channels: usize,
     filters: Vec<[Biquad; 2]>,
+    histories: Vec<History>,
     /// Summed squares of the 100 ms quarter-block being filled, by channel.
     quarter: Vec<f64>,
     filled: usize,
     /// Each finished quarter-block's mean square, summed over channels.
     quarters: Vec<f64>,
     peak: f64,
+    true_peak: f64,
 }
 
 /// Samples in a quarter of a block: 100 ms.
@@ -93,10 +188,12 @@ impl Meter {
         Meter {
             channels,
             filters: vec![k_weighting(); channels],
+            histories: vec![History::default(); channels],
             quarter: vec![0.0; channels],
             filled: 0,
             quarters: Vec::new(),
             peak: 0.0,
+            true_peak: 0.0,
         }
     }
 
@@ -106,6 +203,7 @@ impl Meter {
             for (channel, sample) in frame.iter().enumerate() {
                 let x = f64::from(*sample);
                 self.peak = self.peak.max(x.abs());
+                self.true_peak = self.true_peak.max(self.histories[channel].push(x));
                 let [first, second] = &mut self.filters[channel];
                 let y = second.run(first.run(x));
                 self.quarter[channel] += y * y;
@@ -152,6 +250,7 @@ impl Meter {
         Loudness {
             integrated,
             peak: 20.0 * self.peak.log10(),
+            true_peak: 20.0 * self.true_peak.max(self.peak).log10(),
         }
     }
 }
@@ -236,6 +335,38 @@ mod tests {
         let silent = measured(&vec![0.0; 4 * RATE as usize * 2]);
         assert_eq!(silent.integrated, f64::NEG_INFINITY);
         assert_eq!(gain_to(&silent, -14.0), None);
+    }
+
+    #[test]
+    fn a_peak_between_the_samples_is_found() {
+        // A quarter of the rate, a quarter-turn off: every sample lands at
+        // 0.707 of the crest, which falls halfway between two of them.
+        let count = 4 * RATE as usize;
+        let samples: Vec<f32> = (0..count)
+            .flat_map(|n| {
+                let x = (std::f64::consts::FRAC_PI_2 * n as f64 + std::f64::consts::FRAC_PI_4).sin()
+                    as f32;
+                [x, x]
+            })
+            .collect();
+        let read = measured(&samples);
+        assert!((read.peak + 3.01).abs() < 0.05, "{}", read.peak);
+        assert!(
+            read.true_peak > -0.5 && read.true_peak < 0.5,
+            "{}",
+            read.true_peak
+        );
+    }
+
+    #[test]
+    fn a_low_tone_peaks_where_its_samples_do() {
+        let tone = measured(&sine(997.0, 0.1, 4.0));
+        assert!(
+            (tone.true_peak - tone.peak).abs() < 0.1,
+            "{} against {}",
+            tone.true_peak,
+            tone.peak
+        );
     }
 
     #[test]

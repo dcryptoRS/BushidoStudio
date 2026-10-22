@@ -95,7 +95,29 @@ pub fn shown<'a>(
 /// The official site, which the guides and the developer docs are pages of.
 const SITE: &str = "https://concat.standalones.org";
 /// The repository: the code, the issues, the releases.
-pub const REPOSITORY: &str = "https://github.com/jub0t/Concat";
+/// The repository's page (Royalty Studio fork): Bushido Studio's once
+/// `concat_host::dirs::REPOSITORY` names one, Concat's until then.
+pub fn repository() -> String {
+    concat_host::dirs::repository_url()
+}
+
+/// The notes for the release this build is: under the tag Bushido Studio's
+/// release workflow pushes once it has a repository, and until then the
+/// notes of the Concat release it is built on.
+fn release_notes() -> String {
+    match concat_host::dirs::REPOSITORY {
+        Some(_) => format!(
+            "{}/releases/tag/v{}",
+            repository(),
+            env!("CARGO_PKG_VERSION")
+        ),
+        None => format!(
+            "https://github.com/{}/releases/tag/v{}",
+            concat_host::dirs::UPSTREAM,
+            concat_host::dirs::BASED_ON
+        ),
+    }
+}
 
 /// Where each of the launch screen's links goes, by the name the screen
 /// sends. One table, so a moved page is one line here. Every address is a
@@ -107,12 +129,10 @@ pub fn link(name: &str) -> Option<String> {
         "guides" => format!("{SITE}/guides/"),
         "first-edit" => format!("{SITE}/guides/first-edit/"),
         "report" => format!("{SITE}/guides/report-a-problem/"),
-        "github" => REPOSITORY.to_owned(),
+        "github" => repository(),
         // The invite the README carries.
         "discord" => "https://discord.gg/DVuPfpXfqP".to_owned(),
-        // The notes for the release this build is, under the tag the
-        // release workflow pushes.
-        "release-notes" => format!("{REPOSITORY}/releases/tag/v{}", env!("CARGO_PKG_VERSION")),
+        "release-notes" => release_notes(),
         _ => return None,
     })
 }
@@ -657,10 +677,7 @@ mod tests {
                 "{name}"
             );
         }
-        assert_eq!(
-            link("release-notes").unwrap(),
-            format!("{REPOSITORY}/releases/tag/v{}", env!("CARGO_PKG_VERSION"))
-        );
+        assert_eq!(link("release-notes").unwrap(), release_notes());
         assert_eq!(link("nowhere"), None);
     }
 

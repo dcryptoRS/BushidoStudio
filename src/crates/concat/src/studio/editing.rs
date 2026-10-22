@@ -8,9 +8,10 @@
 //! The edits themselves are `concat_project`'s commands; here is when they
 //! are asked for and how a drag shows them before it lets go.
 
-use concat_project::Command;
+use concat_host::reframe::FollowRequest;
 use concat_project::commands::{self, IdMint};
-use concat_project::model::{Clip, ClipKind, MarkerColor};
+use concat_project::model::{Clip, ClipKind, MarkerColor, MediaKind, VideoSettings};
+use concat_project::{Command, Follow};
 
 use super::{Gesture, Studio};
 use crate::format::frames_timecode;
@@ -26,6 +27,10 @@ const DUCK_DEPTH: f64 = 9.0;
 
 /// The step the voice is listened for at, in seconds.
 const VOICE_STEP: f64 = 0.05;
+
+/// Frames a J or an L cut leads or trails the picture by: ten, a third of
+/// a second at 30 - the first length an editor reaches for.
+const SPLIT_FRAMES: f64 = 10.0;
 
 /// The colour a marker is drawn in.
 pub fn marker_tint(color: MarkerColor) -> slint::Color {
@@ -470,6 +475,172 @@ impl Studio {
             release: 0.6,
         });
         self.notify(&tf("duck.done", &[&format!("{DUCK_DEPTH:.0}")]), false);
+    }
+
+    // ── a vertical copy ──
+
+    /// A vertical copy of the active timeline, for the phone (Royalty Studio
+    /// fork): at 1080 x 1920 - 2160 x 3840 for a 4K one - and its own rate,
+    /// each picture covering the frame and following its subject. The
+    /// subjects are looked for on a thread of their own, by the person model
+    /// on each picture twice a second; the copy is then made in one step by
+    /// `Command::ReframeTimeline`, and becomes the timeline shown.
+    pub fn reframe_vertical(&mut self) {
+        if self.reframing {
+            self.notify(&t("reframe.busy"), false);
+            return;
+        }
+        let timeline = self.timeline().clone();
+        let video = timeline.video;
+        if video.height >= video.width {
+            self.notify(&t("reframe.alreadyVertical"), false);
+            return;
+        }
+        let requests: Vec<FollowRequest> = timeline
+            .clips
+            .iter()
+            .filter(|clip| matches!(clip.kind, ClipKind::Video | ClipKind::Image))
+            .filter_map(|clip| {
+                let media = self.project().media_by_id(&clip.media_id)?;
+                let (Some(width), Some(height)) = (media.width, media.height) else {
+                    return None;
+                };
+                Some(FollowRequest {
+                    clip_id: clip.id.clone(),
+                    media_path: media.path.clone(),
+                    media_size: (width, height),
+                    still: clip.kind == ClipKind::Image || media.kind == MediaKind::Image,
+                    source_start: clip.source_start,
+                    source_span: clip.duration * clip.speed.max(1e-3),
+                    crop: clip.crop.map_or([0.0; 4], |crop| {
+                        [crop.left, crop.top, crop.right, crop.bottom]
+                    }),
+                })
+            })
+            .collect();
+        let vertical = if video.height >= 2160 {
+            VideoSettings {
+                width: 2160,
+                height: 3840,
+                ..video
+            }
+        } else {
+            VideoSettings {
+                width: 1080,
+                height: 1920,
+                ..video
+            }
+        };
+        self.reframing = true;
+        self.notify(&tf("reframe.looking", &[&requests.len()]), false);
+        let epoch = crate::host::project_epoch();
+        let timeline_id = timeline.id.clone();
+        let name = format!("{} · 9:16", timeline.name);
+        let spawned = std::thread::Builder::new()
+            .name("concat reframe".to_owned())
+            .spawn(move || {
+                let cancel = std::sync::atomic::AtomicBool::new(false);
+                let found = concat_host::reframe::follow(&requests, &cancel, &mut |_| {});
+                crate::host::on_ui(move |studio, _, _| {
+                    studio.reframe_arrived(epoch, timeline_id, name, vertical, found);
+                });
+            });
+        if let Err(error) = spawned {
+            log::warn!("reframe: {error}");
+            self.reframing = false;
+        }
+    }
+
+    /// The subjects found for a vertical copy: the copy made, unless the
+    /// project it was asked in has closed since.
+    fn reframe_arrived(
+        &mut self,
+        epoch: u64,
+        timeline_id: String,
+        name: String,
+        video: VideoSettings,
+        found: Result<Vec<Follow>, String>,
+    ) {
+        self.reframing = false;
+        if crate::host::project_epoch() != epoch {
+            return;
+        }
+        let follow = match found {
+            Ok(follow) => follow,
+            Err(error) => {
+                log::warn!("reframe: {error}");
+                self.notify(&tf("reframe.failed", &[&error]), true);
+                return;
+            }
+        };
+        let followed = follow.len();
+        log::info!("reframe: a vertical copy, {followed} pictures following their subject");
+        self.apply(Command::ReframeTimeline {
+            timeline_id,
+            name,
+            video,
+            follow,
+        });
+        self.notify(&tf("reframe.done", &[&followed]), false);
+    }
+
+    // ── J and L cuts ──
+
+    /// A J cut (`early`) or an L cut on the cut into `id` (Royalty Studio
+    /// fork): the sound's cut rolled [`SPLIT_FRAMES`] earlier, so the next
+    /// shot is heard before it is seen, or later, so the last one is still
+    /// heard over it - the picture's cut left where it is. What the roll
+    /// tool does with Alt held, in one click. `id` is the incoming picture
+    /// or its sound.
+    pub fn split_edit(&mut self, id: &str, early: bool) {
+        let Some((left, right)) = self.sound_cut_into(id) else {
+            self.notify(&t("splitEdit.noCut"), false);
+            return;
+        };
+        let frames = SPLIT_FRAMES * self.frame_seconds();
+        self.apply(Command::Scoped {
+            scope: concat_project::Scope {
+                alone: true,
+                ..Default::default()
+            },
+            command: Box::new(Command::RollEdit {
+                left_clip_id: left,
+                right_clip_id: right,
+                delta: if early { -frames } else { frames },
+            }),
+        });
+    }
+
+    /// The cut on a sound lane where `id`'s sound begins: the sound clip
+    /// that ends there and the one that starts there. `id` is that sound,
+    /// or a picture linked to it.
+    pub(super) fn sound_cut_into(&self, id: &str) -> Option<(String, String)> {
+        let clip = self.clip(id)?;
+        let timeline = self.timeline();
+        let sounds: Vec<&Clip> = if clip.kind == ClipKind::Audio {
+            vec![clip]
+        } else {
+            let link = clip.link.as_deref()?;
+            timeline
+                .clips
+                .iter()
+                .map(|other| &**other)
+                .filter(|other| {
+                    other.kind == ClipKind::Audio && other.link.as_deref() == Some(link)
+                })
+                .collect()
+        };
+        sounds.into_iter().find_map(|sound| {
+            timeline
+                .clips
+                .iter()
+                .find(|other| {
+                    other.id != sound.id
+                        && other.track_id == sound.track_id
+                        && (other.start + other.duration - sound.start).abs() < 1e-5
+                })
+                .map(|before| (before.id.clone(), sound.id.clone()))
+        })
     }
 
     /// Where `clip` speaks, in timeline seconds, read off its waveform: the

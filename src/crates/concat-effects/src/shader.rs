@@ -1638,7 +1638,11 @@ fn lay_params(
                 );
             }
             ParamType::Curve => {
-                let points = curve_points(values, &slot.key);
+                let rest = params
+                    .iter()
+                    .find(|param| param.key == slot.key)
+                    .and_then(|param| param.rest);
+                let points = curve_points_resting(values, &slot.key, rest);
                 let slopes = monotone_slopes(&points);
                 for (index, (&(x, y), slope)) in points.iter().zip(slopes).enumerate() {
                     let at = slot.offset + index * 16;
@@ -1703,6 +1707,17 @@ enum Width {
 /// fewer than two is the straight line from black to white. Two points at
 /// one place along the curve are one, the later.
 pub fn curve_points(values: &BTreeMap<String, f64>, key: &str) -> Vec<(f64, f64)> {
+    curve_points_resting(values, key, None)
+}
+
+/// [`curve_points`] for a curve that rests flat at `rest` with no points
+/// (Royalty Studio fork; see [`crate::Param::rest`]); `None` rests on the
+/// line from black to white.
+pub fn curve_points_resting(
+    values: &BTreeMap<String, f64>,
+    key: &str,
+    rest: Option<f64>,
+) -> Vec<(f64, f64)> {
     let mut points: Vec<(f64, f64)> = (0..MAX_CURVE_POINTS)
         .filter_map(|n| {
             let x = values.get(&format!("{key}.{n}.x"))?;
@@ -1719,9 +1734,48 @@ pub fn curve_points(values: &BTreeMap<String, f64>, key: &str) -> Vec<(f64, f64)
         same
     });
     if points.len() < 2 {
-        return vec![(0.0, 0.0), (1.0, 1.0)];
+        return match rest {
+            Some(level) => vec![(0.0, level), (1.0, level)],
+            None => vec![(0.0, 0.0), (1.0, 1.0)],
+        };
     }
     points
+}
+
+/// A curve across hues at `hue` (Royalty Studio fork): through its points
+/// round the wheel, the last running on into the first, each point left at
+/// the slope between its neighbours - what the hue curves' shader works out
+/// (`hue_curve_at`), so the inspector draws what the picture gets. `points`
+/// sorted by x, as [`curve_points_resting`] gives them; held to 0..1.
+pub fn hue_curve_value(points: &[(f64, f64)], hue: f64) -> f64 {
+    let n = points.len();
+    if n < 2 {
+        return points.first().map_or(0.5, |point| point.1);
+    }
+    let hue = hue.rem_euclid(1.0);
+    // The stretch `hue` is in, the last one wrapping past red.
+    let i = (0..n - 1)
+        .find(|&k| hue >= points[k].0 && hue < points[k + 1].0)
+        .unwrap_or(n - 1);
+    let at = if hue < points[0].0 { hue + 1.0 } else { hue };
+    // A point `j` places on from `i`, a turn on or back where it wraps.
+    let point = |j: isize| {
+        let wrapped = j.rem_euclid(n as isize) as usize;
+        let turns = j.div_euclid(n as isize) as f64;
+        (points[wrapped].0 + turns, points[wrapped].1)
+    };
+    let i = i as isize;
+    let (before, a, b, after) = (point(i - 1), point(i), point(i + 1), point(i + 2));
+    let slope_a = (b.1 - before.1) / (b.0 - before.0).max(1e-6);
+    let slope_b = (after.1 - a.1) / (after.0 - a.0).max(1e-6);
+    let h = (b.0 - a.0).max(1e-6);
+    let s = ((at - a.0) / h).clamp(0.0, 1.0);
+    let (s2, s3) = (s * s, s * s * s);
+    let y = (2.0 * s3 - 3.0 * s2 + 1.0) * a.1
+        + (s3 - 2.0 * s2 + s) * h * slope_a
+        + (3.0 * s2 - 2.0 * s3) * b.1
+        + (s3 - s2) * h * slope_b;
+    y.clamp(0.0, 1.0)
 }
 
 /// The slope a curve leaves each of its points at: Fritsch and Carlson's
@@ -1848,6 +1902,32 @@ impl TransitionShader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hue_curve_rests_flat_and_wraps_round_red() {
+        let flat = curve_points_resting(&BTreeMap::new(), "hue", Some(0.5));
+        assert_eq!(flat, vec![(0.0, 0.5), (1.0, 0.5)]);
+        for hue in [0.0, 0.3, 0.99] {
+            assert!((hue_curve_value(&flat, hue) - 0.5).abs() < 1e-9);
+        }
+        // Six points round the wheel, red lifted.
+        let points: Vec<(f64, f64)> = (0..6)
+            .map(|k| (f64::from(k) / 6.0, if k == 0 { 0.8 } else { 0.5 }))
+            .collect();
+        assert!((hue_curve_value(&points, 0.0) - 0.8).abs() < 1e-9);
+        assert!((hue_curve_value(&points, 0.5) - 0.5).abs() < 1e-9);
+        // Either side of red the curve is the same: it runs on round.
+        let (before, after) = (
+            hue_curve_value(&points, 0.999),
+            hue_curve_value(&points, 0.001),
+        );
+        assert!((before - after).abs() < 0.01, "{before} against {after}");
+        assert!(before > 0.79, "{before}");
+        // And through each point it was given.
+        for (x, y) in &points {
+            assert!((hue_curve_value(&points, *x) - y).abs() < 1e-9);
+        }
+    }
 
     fn manifest(params: &str) -> Manifest {
         Manifest::parse(&format!(

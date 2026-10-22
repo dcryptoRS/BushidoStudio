@@ -397,10 +397,30 @@ fn unity() -> f64 {
     1.0
 }
 
-/// The ceiling a normalised mix's samples are limited to: -1.5 dBFS, so the
-/// true peak - between the samples - stays under the -1 dBTP the platforms
+/// Where a normalised mix's true peak - between the samples as well, after
+/// the AAC encoder - must end: -1 dBTP, what the platforms and EBU R128
 /// ask for (Royalty Studio fork).
-const LOUDNESS_CEILING: f64 = 0.841_395;
+const TRUE_PEAK_LIMIT: f64 = -1.0;
+
+/// Where the limiter is set at first, in dBTP: half a unit under the limit,
+/// the room the encoder takes back.
+const LIMITER_START: f64 = -1.5;
+
+/// How many times a mix whose true peak came out over the limit is made
+/// again with the limiter lower by what it went over.
+const LIMITER_TRIES: usize = 3;
+
+/// The chain for a gain and a ceiling, in dB: the gain, then a limiter on
+/// the samples. The peaks between them are not its: what was written is
+/// measured for them after the encoder, and made again with the ceiling
+/// lower while they are over (see the export). Run four times over the rate
+/// inside the mix's graph, the limiter held the peaks some three units
+/// under its ceiling and took the loudness with them, where the same chain
+/// on its own behaves; at the mix's rate it does as it is told.
+fn master_chain(gain: f64, ceiling: f64) -> String {
+    let limit = 10f64.powf(ceiling / 20.0).clamp(0.0625, 1.0);
+    format!("volume={gain:.2}dB,alimiter=limit={limit:.4}:level=0")
+}
 
 /// Everything a full export needs: the destination, the output format, and
 /// the flattened clip list.
@@ -1282,28 +1302,49 @@ pub fn render_on(
                 .map_err(failed)?;
             // A loudness asked for (Royalty Studio fork): the mix measured,
             // then mixed again through the gain that brings it there and a
-            // limiter that keeps its peaks under the ceiling - a linear
-            // normalisation, which leaves the mix's dynamics as they were.
+            // limiter - a linear normalisation, which leaves the mix's
+            // dynamics as they were. What was written is measured as it will
+            // be played, encoded, and made again with the limiter lower while
+            // its true peak is over the limit.
             if let Some(target) = request.loudness {
                 reporter.cancelled()?;
                 reporter.emit(0, total_frames, "mixing audio");
-                let measured =
-                    concat_media::loudness::measure(&mixed, reporter.cancel).map_err(failed)?;
+                let measure = |path: &Path| {
+                    concat_media::loudness::measure(path, reporter.cancel).map_err(failed)
+                };
+                let measured = measure(&mixed)?;
                 if let Some(gain) = concat_media::loudness::gain_to(&measured, target) {
-                    let master =
-                        format!("volume={gain:.2}dB,alimiter=limit={LOUDNESS_CEILING:.4}:level=0");
-                    audio::mix_to_file_mastered(
-                        &mix,
-                        timeline_end,
-                        &mixed,
-                        reporter.cancel,
-                        &master,
-                    )
-                    .map_err(failed)?;
+                    let mut ceiling = LIMITER_START;
+                    let mut result = measured;
+                    for _ in 0..LIMITER_TRIES {
+                        reporter.cancelled()?;
+                        audio::mix_to_file_mastered(
+                            &mix,
+                            timeline_end,
+                            &mixed,
+                            reporter.cancel,
+                            &master_chain(gain, ceiling),
+                        )
+                        .map_err(failed)?;
+                        result = measure(&mixed)?;
+                        log::info!(
+                            "export: limited at {ceiling:.2} dBTP, the mix is {:.2} LUFS, true peak {:.2} dBTP",
+                            result.integrated,
+                            result.true_peak
+                        );
+                        let over = result.true_peak - TRUE_PEAK_LIMIT;
+                        if over <= 0.0 {
+                            break;
+                        }
+                        ceiling -= over + 0.1;
+                    }
                     log::info!(
-                        "export: the mix measured {:.1} LUFS (peak {:.1} dBFS), brought to {target:.1}",
+                        "export: the mix measured {:.1} LUFS (true peak {:.1} dBTP), \
+                         brought to {target:.1}: it came out at {:.1} LUFS, true peak {:.1} dBTP",
                         measured.integrated,
-                        measured.peak
+                        measured.true_peak,
+                        result.integrated,
+                        result.true_peak
                     );
                 }
             }

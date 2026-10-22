@@ -94,3 +94,5 @@ whisper.dll                    48    0     0      0          0
 # Haswell fails the build.
 concat.exe                     -     -     ~1000  -          -
 concat                         -     -     ~1000  -          -
+# Bushido Studio's binary is Concat's renamed (Royalty Studio fork).
+bushido-studio                 -     -     ~1000  -          -

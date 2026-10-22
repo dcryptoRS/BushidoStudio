@@ -1,54 +1,62 @@
-# Concat's Linux packages: one description for the .deb and the .rpm.
+# Bushido Studio's Linux packages: one description for the .deb and the .rpm
+# (Royalty Studio fork; Concat's, renamed).
 #
 # Built by build-app.yml with nfpm from the staged folder the AppImage is
 # also made of, so every Linux bundle ships the same files. The program lives
-# whole under /opt/concat - the binary finds its libraries in lib/ beside
-# itself, by rpath, and nothing else on the system has to line up - with
-# a launcher on the path, a desktop entry and an icon where the desktop
+# whole under /opt/bushido-studio - the binary finds its libraries in lib/
+# beside itself, by rpath, and nothing else on the system has to line up -
+# with a launcher on the path, a desktop entry and icons where the desktop
 # looks for them. The version and architecture are handed in as
 # environment; the files are named relative to the staged folder, which
 # is where nfpm is run from:
 #
-#   cd stage/Concat-0.2.8-linux-x86_64
-#   VERSION=0.2.8 NFPM_ARCH=amd64 nfpm package -f ../../assets/linux/nfpm.yaml -p deb -t ..
-name: concat
+#   cd stage/BushidoStudio-0.1.0-linux-x86_64
+#   VERSION=0.1.0 NFPM_ARCH=amd64 nfpm package -f ../../assets/linux/nfpm.yaml -p deb -t ..
+name: bushido-studio
 arch: ${NFPM_ARCH}
 platform: linux
 version: ${VERSION}
 section: video
 priority: optional
-maintainer: Concat contributors <jub0trd@gmail.com>
-vendor: Concat contributors
+# The address to publish as the maintainer: a placeholder until it is
+# chosen (Royalty Studio fork).
+maintainer: Royalty Studio <maintainer@royalty-studio.invalid>
+vendor: Royalty Studio
+# Concat's page until Bushido Studio has a repository of its own
+# (concat_host::dirs::REPOSITORY).
 homepage: https://github.com/jub0t/Concat
 license: AGPL-3.0-or-later
 description: |
-  Free and open source video editor.
-  Timeline editing, effects, transitions, titles, captions and speech,
-  with FFmpeg underneath and hardware-accelerated preview and export.
+  Video editor for reels and film, based on Concat.
+  A modified version of Concat (github.com/jub0t/Concat) by Royalty Studio:
+  timeline editing with linked picture and sound, colour with scopes and
+  hue curves, captions and silence removal with Whisper on the GPU, delivery
+  presets normalised to the platforms' loudness, and an assistant that edits.
+  Concat is not responsible for this version.
 
 contents:
-  - src: concat
-    dst: /opt/concat/concat
+  - src: bushido-studio
+    dst: /opt/bushido-studio/bushido-studio
     file_info:
       mode: 0755
   - src: lib/*
-    dst: /opt/concat/lib/
-  - src: pkg/concat
-    dst: /usr/bin/concat
+    dst: /opt/bushido-studio/lib/
+  - src: pkg/bushido-studio
+    dst: /usr/bin/bushido-studio
     file_info:
       mode: 0755
-  - src: pkg/concat.desktop
-    dst: /usr/share/applications/concat.desktop
-  - src: concat.png
-    dst: /usr/share/icons/hicolor/256x256/apps/concat.png
+  - src: pkg/bushido-studio.desktop
+    dst: /usr/share/applications/bushido-studio.desktop
+  - src: bushido-studio.png
+    dst: /usr/share/icons/hicolor/256x256/apps/bushido-studio.png
   - src: LICENSE
-    dst: /usr/share/doc/concat/LICENSE
+    dst: /usr/share/doc/bushido-studio/LICENSE
   - src: THIRD_PARTY_NOTICES.md
-    dst: /usr/share/doc/concat/THIRD_PARTY_NOTICES.md
+    dst: /usr/share/doc/bushido-studio/THIRD_PARTY_NOTICES.md
 
 # What the binary loads from the system rather than from lib/: the
-# toolkit the file dialogs use, sound, fonts and OpenGL. Named as each
-# family names them.
+# toolkit the file dialogs use, sound, fonts, OpenGL and the Vulkan loader
+# (the preview and Whisper's backend). Named as each family names them.
 overrides:
   deb:
     depends:
@@ -59,6 +67,7 @@ overrides:
       - libxkbcommon0
       - libxkbcommon-x11-0
       - libgl1
+      - libvulkan1
       - libasound2 | libasound2t64
   rpm:
     depends:
@@ -68,4 +77,5 @@ overrides:
       - libxkbcommon
       - libxkbcommon-x11
       - mesa-libGL
+      - vulkan-loader
       - alsa-lib

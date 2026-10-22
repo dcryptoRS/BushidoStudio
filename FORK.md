@@ -14,10 +14,16 @@ added carry the line `SPDX-FileCopyrightText: 2026 Royalty Studio`.
 
 - The name, the icon, the app identifier (`studio.bushido.editor`, whose
   first run takes over Concat's settings and models, leaving Concat's own
-  folders as they were) and the binary (`bushido-studio`). The updater is
-  off until Bushido Studio has a release channel of its own.
+  folders as they were) and the binary (`bushido-studio`). Its own version
+  number, from 0.1.0; it tells a client made for Concat that it is Concat
+  0.2.8. The updater is off until Bushido Studio has a release channel of
+  its own (`concat_host::dirs::REPOSITORY`).
+- Linux alone: the packages (.deb, .rpm, Arch, AppImage) under the new
+  name, built with Whisper on Vulkan; the macOS, Windows and phone builds
+  are gone from CI.
 - Decoding on NVDEC and encoding on NVENC; previews on the GPU; Whisper on
-  CUDA.
+  CUDA or Vulkan. A zoomed picture decoded at the size it is drawn, not at
+  its fit.
 - Live mode for the API and the MCP server; the Claude panel, its guard,
   its craft guide and its settings; media generation (Higgsfield,
   BytePlus ModelArk, Gemini) and the desktop keyring for the keys.
@@ -27,7 +33,12 @@ added carry the line `SPDX-FileCopyrightText: 2026 Royalty Studio`.
 - GPU scopes, the HSL Qualifier, the Color Mixer, Broadcast Safe, and
   `frame_levels` for the assistant.
 - Markers, J-K-L, in and out, three-point editing, lift and extract,
-  roll, slip and slide.
+  roll, slip and slide; J and L cuts.
+- Hue Curves (`concat.hue-curves`), and curves that rest flat and run
+  round the colour wheel.
+- Ducking, loudness (EBU R128, the true peak held under −1 dBTP), delivery presets,
+  and a vertical copy of a timeline that follows each shot's subject
+  (`ReframeTimeline`).
 - The look: Inter, pill buttons, round switches, the blue accent; text
   drawn with sub-pixel positioning on Linux.
 

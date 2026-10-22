@@ -1,28 +1,24 @@
 name: Release
 
-# Pushing a tag that starts with v (v0.3.0, v0.3.0-alpha.1, ...) builds the
-# app for every platform and architecture, desktops and phones, and
-# publishes a GitHub release under that tag with one bundle per target and
-# a checksum file. A tag
+# Pushing a tag that starts with v (v0.2.0, v0.2.0-alpha.1, ...) builds
+# Bushido Studio for Linux, x86_64 and aarch64, and publishes a GitHub
+# release under that tag with its packages and a checksum file. A tag
 # containing a hyphen is a pre-release. The tag must be the workspace's
 # version, alone or with a pre-release suffix: a release whose files say
 # one number and whose tag says another is a release nobody can reason
 # about.
 #
-# The bundles are self-contained: the macOS .dmg carries its FFmpeg dylibs
-# and is notarised when the signing secrets are set; the Linux packages
-# (.deb, .rpm, .AppImage, Arch) and the Windows installers carry the
-# FFmpeg runtime libraries beside the binary; the Android .apk is signed
-# with the repository's key, and the iOS .ipa is signed by the tester on
-# the way onto the phone. Nothing is built until CI has passed on the tag,
-# and nothing is published until every bundle has been launched where it
-# was built: build-app.yml starts each one (`--version`, `--smoke`, and on
-# x86_64 under an emulated Ivy Bridge) before it uploads it, and a bundle
-# that does not start fails its job, which `publish` needs.
+# The packages (.deb, .rpm, .AppImage, Arch) carry the FFmpeg runtime
+# libraries beside the binary. Nothing is built until CI has passed on the
+# tag, and nothing is published until every package has been launched where
+# it was built: build-app.yml starts each one (`--version`, `--smoke`, and
+# on x86_64 under an emulated Ivy Bridge) before it uploads it, and a
+# package that does not start fails its job, which `publish` needs.
 #
 # The release is created as a draft. A person looks it over - the notes,
 # the files - and publishes it from the Releases page; nothing reaches
-# the updater or the downloads page before then.
+# the updater before then. The updater reads the release's manifest.json
+# from the repository concat_host::dirs::REPOSITORY names.
 on:
   push:
     tags: ["v*"]
@@ -79,7 +75,7 @@ jobs:
           esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           # The bundles are named for the version, not the tag: v0.2.1 and
-          # v0.2.1-alpha.22 both produce Concat-0.2.1-* files.
+          # v0.2.1-alpha.22 both produce BushidoStudio-0.2.1-* files.
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   # The engine's tests and lints, on the tagged commit: a tag on a red
@@ -102,19 +98,9 @@ jobs:
       ref: ${{ needs.check.outputs.tag }}
     secrets: inherit
 
-  # `sign` is the one thing that puts the repository's Android key into a
-  # run; a pull request's build of mobile.yml never gets it.
-  phones:
-    needs: [check, engine]
-    uses: ./.github/workflows/mobile.yml
-    with:
-      ref: ${{ needs.check.outputs.tag }}
-      sign: true
-    secrets: inherit
-
   publish:
     name: Publish release
-    needs: [check, build, phones]
+    needs: [check, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -123,7 +109,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: bundles
-          pattern: Concat-*
+          pattern: BushidoStudio-*
           merge-multiple: true
 
       # The tree the release is cut from: the notes are read out of its
@@ -148,6 +134,7 @@ jobs:
             --version "$VERSION" \
             --tag "$TAG" \
             --bundles bundles \
+            --repo "$GITHUB_REPOSITORY" \
             --out bundles/manifest.json
           cat bundles/manifest.json
 
@@ -167,12 +154,6 @@ jobs:
         id: notes
         env:
           TAG: ${{ needs.check.outputs.tag }}
-          # Whether a certificate signed the Windows bundles: build-app.yml
-          # leaves them unsigned, and says so, when the secret is unset.
-          WINDOWS_SIGNED: ${{ secrets.WINDOWS_CERTIFICATE_PFX != '' }}
-          # No launch check reaches the APK's own code until the emulator
-          # runs a build of it it can execute (see smoke-android.sh).
-          ANDROID_STARTED: "false"
         run: |
           set -euo pipefail
           cd source
@@ -189,7 +170,7 @@ jobs:
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.check.outputs.tag }}
-          name: Concat ${{ needs.check.outputs.tag }}
+          name: Bushido Studio ${{ needs.check.outputs.tag }}
           draft: true
           prerelease: ${{ contains(needs.check.outputs.tag, '-') }}
           body_path: ${{ runner.temp }}/notes.md

@@ -266,6 +266,7 @@ export component App inherits Window {
     callback export-hdr-changed(on: bool);
     callback export-bitrate-changed(mbps: float);
     callback export-delivery-changed(which: int, index: int);
+    callback export-make-vertical();
     callback export-start();
     callback export-cancel();
     callback export-reveal();
@@ -886,6 +887,7 @@ export component App inherits Window {
         hdr-changed(on) => { root.export-hdr-changed(on); }
         bitrate-changed(mbps) => { root.export-bitrate-changed(mbps); }
         delivery-changed(which, index) => { root.export-delivery-changed(which, index); }
+        make-vertical => { root.export-make-vertical(); }
         begin => { root.export-start(); }
         cancel => { root.export-cancel(); }
         reveal => { root.export-reveal(); }

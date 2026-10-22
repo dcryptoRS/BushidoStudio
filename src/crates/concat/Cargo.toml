@@ -171,6 +171,9 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # Transcription on an NVIDIA card; see concat-speech's `cuda` (Royalty
 # Studio fork).
 cuda = ["concat-speech/cuda"]
+# Transcription on any card through Vulkan; see concat-speech's `vulkan`.
+# The public packages' build.
+vulkan = ["concat-speech/vulkan"]
 
 [build-dependencies]
 slint-build = "1.18"

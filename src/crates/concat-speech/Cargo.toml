@@ -92,6 +92,11 @@ chatterbox = ["dep:ort", "dep:tokenizers", "dep:concat-vision"]
 # built by nvcc and linked against the CUDA runtime and cuBLAS. Needs the
 # CUDA toolkit to build; CMAKE_CUDA_ARCHITECTURES picks the cards.
 cuda = ["whisper-rs/cuda"]
+# Whisper on any card with a Vulkan driver - NVIDIA, AMD, Intel - with
+# nothing more than the driver installed (Royalty Studio fork): ggml's
+# Vulkan backend. Needs the Vulkan headers and glslc to build; what the
+# public Linux packages are built with.
+vulkan = ["whisper-rs/vulkan"]
 
 [lints]
 workspace = true

@@ -64,7 +64,9 @@ impl Listing {
             address: crate::loopback(bound),
             token: token.to_owned(),
             pid: std::process::id(),
-            concat: env!("CARGO_PKG_VERSION").to_owned(),
+            // The Concat release this is built on (Royalty Studio fork):
+            // what a client made for Concat checks against.
+            concat: concat_api::CONCAT_VERSION.to_owned(),
             api_version: concat_api::API_VERSION.to_owned(),
         }
     }

@@ -1,0 +1,42 @@
+format = 2
+
+[effect]
+id = "concat.hue-curves"
+name = "Hue Curves"
+kind = "effect"
+category = "Color"
+order = 18
+description = "One colour changed by its hue, along curves round the wheel: its hue turned, its saturation and its brightness taken up or down, the rest of the picture as it was."
+
+[[param]]
+key = "hue_hue"
+group = "Hue Curves"
+label = "Hue vs Hue"
+type = "curve"
+rest = 0.5
+across = "hue"
+
+[[param]]
+key = "hue_sat"
+group = "Hue Curves"
+label = "Hue vs Sat"
+type = "curve"
+rest = 0.5
+across = "hue"
+
+[[param]]
+key = "hue_lum"
+group = "Hue Curves"
+label = "Hue vs Lum"
+type = "curve"
+rest = 0.5
+across = "hue"
+
+[wgsl]
+entry = "effect.wgsl"
+space = "display"
+
+# The card: the greens of the foliage pulled toward a teal and the reds of
+# a face kept, a look a colourist reaches for.
+[card]
+params = { "hue_hue.0.x" = 0.0, "hue_hue.0.y" = 0.5, "hue_hue.1.x" = 0.1667, "hue_hue.1.y" = 0.5, "hue_hue.2.x" = 0.3333, "hue_hue.2.y" = 0.62, "hue_hue.3.x" = 0.5, "hue_hue.3.y" = 0.5, "hue_hue.4.x" = 0.6667, "hue_hue.4.y" = 0.5, "hue_hue.5.x" = 0.8333, "hue_hue.5.y" = 0.5 }

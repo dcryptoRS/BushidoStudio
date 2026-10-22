@@ -290,6 +290,8 @@ component OutputSection inherits DialogSection {
     callback hdr-changed(on: bool);
     /// A delivery preset (0) or a loudness (1) picked, by its row.
     callback delivery-changed(which: int, index: int);
+    /// A vertical copy asked for, from the note under a vertical preset.
+    callback make-vertical();
 
     title: I18n.t("export.output");
 
@@ -312,6 +314,16 @@ component OutputSection inherits DialogSection {
         color: Theme.danger;
         font-size: Theme.fs-sm;
         wrap: word-wrap;
+    }
+    // The way out of that note: a vertical copy of the edit, its pictures
+    // following their subjects.
+    if root.data.preset-note != "": HorizontalLayout {
+        alignment: start;
+        Button {
+            label: I18n.t("reframe.fromExport");
+            glyph: Glyph.frame;
+            clicked => { root.make-vertical(); }
+        }
     }
 
     DialogRow {
@@ -642,6 +654,7 @@ export component ExportDialog inherits Rectangle {
     callback hdr-changed(on: bool);
     callback bitrate-changed(mbps: float);
     callback delivery-changed(which: int, index: int);
+    callback make-vertical();
     callback begin();
     callback cancel();
     callback reveal();
@@ -815,6 +828,7 @@ export component ExportDialog inherits Rectangle {
                             ten-bit-changed(on) => { root.ten-bit-changed(on); }
                             hdr-changed(on) => { root.hdr-changed(on); }
                             delivery-changed(which, index) => { root.delivery-changed(which, index); }
+                            make-vertical => { root.make-vertical(); }
                         }
                     }
 
@@ -851,6 +865,7 @@ export component ExportDialog inherits Rectangle {
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
                                 delivery-changed(which, index) => { root.delivery-changed(which, index); }
+                                make-vertical => { root.make-vertical(); }
                             }
                             DestinationSection {
                                 data: root.data;
@@ -892,6 +907,7 @@ export component ExportDialog inherits Rectangle {
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
                                 delivery-changed(which, index) => { root.delivery-changed(which, index); }
+                                make-vertical => { root.make-vertical(); }
                             }
                         }
 

@@ -40,6 +40,7 @@ pub mod preview;
 pub mod projects;
 pub mod proxy;
 pub mod record;
+pub mod reframe;
 pub mod reverse;
 #[cfg(target_os = "linux")]
 pub mod secrets;

@@ -38,7 +38,7 @@ mod builtins {
 }
 
 pub use catalogue::{At, Catalogue, Fixture, Package, Probe, package_folders, package_stamp};
-pub use manifest::{CardSettings, FORMAT, Kind, Manifest, Param, ParamType, Space};
+pub use manifest::{CardSettings, CurveAcross, FORMAT, Kind, Manifest, Param, ParamType, Space};
 pub use shader::{Contract, Shader, TransitionShader};
 
 /// Why a package could not be loaded.

@@ -1917,6 +1917,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         };
         state.handle(Msg::Export(msg));
     }));
+    app.on_export_make_vertical(on_window!(|state| {
+        state.handle(Msg::Export(ExportMsg::MakeVertical));
+    }));
     app.on_export_rate_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Export(ExportMsg::RateChanged(index)));
     }));
@@ -2305,6 +2308,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                         }
                         "undo" => state.undo(),
                         "redo" => state.redo(),
+                        "reframe-vertical" => state.reframe_vertical(),
                         "snap" => state.handle(Msg::Timeline(TimelineMsg::SnapToggled)),
                         "pan" => {
                             let on = !state.lanes.pan_mode;

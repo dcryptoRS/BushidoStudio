@@ -756,6 +756,36 @@ mod tests {
     }
 
     #[test]
+    fn a_roll_of_the_sound_alone_is_a_j_cut() {
+        let (mut editor, media) = editor();
+        let a = place_at(&mut editor, &media, 0.0, (0.0, 4.0), false);
+        let b = place_at(&mut editor, &media, 4.0, (5.0, 8.0), false);
+        let (sound_a, sound_b) = (sound_of(&editor, &a).id, sound_of(&editor, &b).id);
+        run(
+            &mut editor,
+            Command::Scoped {
+                scope: Scope {
+                    alone: true,
+                    ..Default::default()
+                },
+                command: Box::new(Command::RollEdit {
+                    left_clip_id: sound_a.clone(),
+                    right_clip_id: sound_b.clone(),
+                    delta: -0.5,
+                }),
+            },
+        );
+        // The second shot is heard half a second before it is seen.
+        let (heard, seen) = (clip(&editor, &sound_b), clip(&editor, &b));
+        assert_eq!((heard.start, heard.source_start), (3.5, 4.5));
+        assert_eq!((seen.start, seen.source_start), (4.0, 5.0));
+        assert_eq!(clip(&editor, &sound_a).duration, 3.5);
+        assert_eq!(clip(&editor, &a).duration, 4.0);
+        // And still linked: it moves with its picture.
+        assert_eq!(heard.link, seen.link);
+    }
+
+    #[test]
     fn a_roll_moves_the_cut_and_keeps_to_the_files() {
         let (mut editor, media) = editor();
         let a = place_at(&mut editor, &media, 0.0, (0.0, 4.0), false);

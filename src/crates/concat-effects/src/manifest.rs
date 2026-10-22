@@ -247,6 +247,26 @@ pub struct Param {
     /// For `enum`: what each value is called, in `values` order.
     #[serde(default)]
     pub labels: Vec<String>,
+    /// For `curve` (Royalty Studio fork): the level a curve with no points
+    /// rests flat at, rather than on the line from black to white - 0.5
+    /// for a curve that takes a quantity up or down from as shot.
+    #[serde(default)]
+    pub rest: Option<f64>,
+    /// For `curve` (Royalty Studio fork): what runs across it.
+    #[serde(default)]
+    pub across: CurveAcross,
+}
+
+/// What runs across a curve, left to right (Royalty Studio fork).
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CurveAcross {
+    /// Levels, black to white.
+    #[default]
+    Level,
+    /// The colour wheel, from red round to red again: the curve wraps, its
+    /// right end running on into its left.
+    Hue,
 }
 
 fn unit() -> f64 {
@@ -579,6 +599,17 @@ impl Manifest {
                     "parameter `{}`: default {} is outside {}..{}",
                     param.key, param.default, param.min, param.max
                 )));
+            }
+            if param.kind != ParamType::Curve
+                && (param.rest.is_some() || param.across != CurveAcross::Level)
+            {
+                return Err(self.invalid(format!(
+                    "parameter `{}`: only a curve rests or runs across hues",
+                    param.key
+                )));
+            }
+            if param.rest.is_some_and(|rest| !(0.0..=1.0).contains(&rest)) {
+                return Err(self.invalid(format!("curve `{}` rests outside 0..1", param.key)));
             }
             if param.kind == ParamType::Curve && param.animate {
                 return Err(self.invalid(format!(

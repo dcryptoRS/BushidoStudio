@@ -1007,6 +1007,9 @@ pub struct Studio {
     /// while they were, which makes for another round when this one ends.
     cards_busy: bool,
     cards_again: bool,
+    /// A vertical copy being worked out (Royalty Studio fork): its
+    /// pictures' subjects are being looked for on a thread of their own.
+    pub(crate) reframing: bool,
     /// The watch on the user's effects folder: a poll every couple of
     /// seconds of what is in it, cheaper than a file-system watcher and
     /// one dependency fewer, at a cost nobody will notice.
@@ -1964,7 +1967,13 @@ fn grading_rows(
                         label: param.label.as_str().into(),
                         group: param.group.as_str().into(),
                         points: ModelRc::default(),
-                        path: grading::curve_path(params, &param.key).into(),
+                        path: grading::curve_path(
+                            params,
+                            &param.key,
+                            grading::CurveShape::of(param),
+                        )
+                        .into(),
+                        hue: param.across == concat_effects::CurveAcross::Hue,
                     },
                     points,
                 ));
@@ -2417,6 +2426,7 @@ impl Studio {
             cards_drawn: 0,
             cards_busy: false,
             cards_again: false,
+            reframing: false,
             packages_watch: slint::Timer::default(),
             packages_seen: 0,
             packages_pending: None,
@@ -4798,7 +4808,8 @@ impl Studio {
     /// or put down when `point` is negative.
     pub fn adjust_curve_point(&mut self, key: &str, point: i32, x: f32, y: f32) {
         self.edit_adjust_link(|link| {
-            grading::set_curve_point(&mut link.params, key, point, x.into(), y.into());
+            let shape = grading::shape_in(&link.id, key);
+            grading::set_curve_point(&mut link.params, key, point, x.into(), y.into(), shape);
         });
     }
 
@@ -4839,7 +4850,8 @@ impl Studio {
     /// echo: moved, or put down when `point` is negative.
     pub fn chain_curve_point(&mut self, index: i32, key: &str, point: i32, x: f32, y: f32) {
         self.edit_chain_link(index, |link| {
-            grading::set_curve_point(&mut link.params, key, point, x.into(), y.into());
+            let shape = grading::shape_in(&link.id, key);
+            grading::set_curve_point(&mut link.params, key, point, x.into(), y.into(), shape);
         });
     }
 
@@ -11965,6 +11977,23 @@ impl Studio {
                 "",
                 clip.kind == model::ClipKind::Audio,
             ));
+            // The cut into it as a J or an L: its sound in early, or the
+            // last shot's still heard over it (Royalty Studio fork).
+            let split = self.sound_cut_into(&clip.id).is_some();
+            rows.push(action(
+                "j-cut",
+                t("splitEdit.jCut"),
+                Glyph::Roll,
+                "",
+                split && !locked,
+            ));
+            rows.push(action(
+                "l-cut",
+                t("splitEdit.lCut"),
+                Glyph::Roll,
+                "",
+                split && !locked,
+            ));
             rows.push(rule());
         }
         let audible = clip.kind != model::ClipKind::Image;
@@ -12287,6 +12316,16 @@ impl Studio {
                     checkable: false,
                     checked: false,
                 },
+                rule(),
+                // A vertical copy of a horizontal edit, its pictures
+                // following their subjects (Royalty Studio fork).
+                row(
+                    "reframe-vertical",
+                    t("reframe.menu"),
+                    Glyph::Frame,
+                    "",
+                    !self.reframing && self.timeline().video.width > self.timeline().video.height,
+                ),
                 rule(),
                 MenuItemData {
                     id: "snap".into(),
@@ -12698,6 +12737,8 @@ impl Studio {
             }
             "freeze" => self.freeze_at_playhead(),
             "duck" => self.duck_under_voice(id),
+            "j-cut" => self.split_edit(id, true),
+            "l-cut" => self.split_edit(id, false),
             // The clip right-clicked, or the selection when it is one of
             // it, as Delete takes it.
             "delete-left" | "delete-right" => {
@@ -13136,7 +13177,14 @@ mod tests {
         let mut link = AppliedFilter::new("concat.adjust");
         link.params.insert("gain.x".to_owned(), 0.25);
         link.params.insert("gain.m".to_owned(), -0.5);
-        crate::grading::set_curve_point(&mut link.params, "red", -1, 0.5, 0.6);
+        crate::grading::set_curve_point(
+            &mut link.params,
+            "red",
+            -1,
+            0.5,
+            0.6,
+            crate::grading::CurveShape::default(),
+        );
         let (wheels, curves) = grading_rows(package, Some(&link), -1, None);
         assert_eq!((wheels[2].x, wheels[2].master), (0.25, -0.5));
         assert!(!wheels[2].keyable, "a stack's wheels take no keys");

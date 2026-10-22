@@ -2,7 +2,7 @@
   # Concat on Nix, Linux only: the people asking for a flake run Linux, and
   # the macOS and Windows builds ship from release.yml.
   #
-  #   nix build            the editor window, ./result/bin/concat
+  #   nix build            the editor window, ./result/bin/bushido-studio
   #   nix run              build and launch it
   #   nix develop          a shell with everything `cargo run -p concat` needs
   #
@@ -146,10 +146,14 @@
     in
     {
       packages = eachSystem (pkgs: rec {
-        default = concat;
-        concat = pkgs.rustPlatform.buildRustPackage {
-          pname = "concat";
-          version = "0.2.8";
+        default = bushido-studio;
+        # The old name, for a configuration that still asks for it.
+        concat = bushido-studio;
+        # Bushido Studio, a modified Concat (Royalty Studio fork). The
+        # version is the workspace's, in src/Cargo.toml: keep the two in step.
+        bushido-studio = pkgs.rustPlatform.buildRustPackage {
+          pname = "bushido-studio";
+          version = "0.1.0";
           src = self;
 
           cargoRoot = "src";
@@ -192,12 +196,12 @@
 
           desktopItems = [
             (pkgs.makeDesktopItem {
-              name = "concat";
-              exec = "concat";
-              icon = "concat";
-              desktopName = "Concat";
-              comment = "Free and open source video editor";
-              startupWMClass = "concat";
+              name = "bushido-studio";
+              exec = "bushido-studio";
+              icon = "bushido-studio";
+              desktopName = "Bushido Studio";
+              comment = "Video editor for reels and film, based on Concat";
+              startupWMClass = "bushido-studio";
               categories = [
                 "AudioVideo"
                 "AudioVideoEditing"
@@ -206,16 +210,20 @@
           ];
 
           postInstall = ''
-            install -Dm644 assets/concat_logo_512.png \
-              $out/share/icons/hicolor/512x512/apps/concat.png
+            for size in 16 24 32 48 64 128 256 512; do
+              install -Dm644 assets/brand/bushido-studio-$size.png \
+                $out/share/icons/hicolor/''${size}x''${size}/apps/bushido-studio.png
+            done
           '';
 
           meta = {
-            description = "Free and open source video editor";
+            description = "Video editor for reels and film, based on Concat";
+            # Concat's page until Bushido Studio has a repository of its own
+            # (concat_host::dirs::REPOSITORY).
             homepage = "https://github.com/jub0t/Concat";
             license = pkgs.lib.licenses.agpl3Plus;
             platforms = systems;
-            mainProgram = "concat";
+            mainProgram = "bushido-studio";
           };
         };
       });
@@ -240,7 +248,7 @@
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (runtimeLibs pkgs);
 
           shellHook = ''
-            echo "Concat: cd src && cargo run -p concat"
+            echo "Bushido Studio: cd src && cargo run -p concat --bin bushido-studio"
           '';
         };
       });

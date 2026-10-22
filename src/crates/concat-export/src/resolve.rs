@@ -346,13 +346,17 @@ pub(crate) fn build_timeline(
             let planned = planned_geometry(clip);
             let steadied = StabilizeJob::of(clip);
             if let Some(size) = fitted_size(request, clip, planned.is_some()) {
-                // A stabilized picture is drawn larger by its zoom: decoded
-                // that much larger too, up to the file's own size, so the
-                // zoom costs no sharpness the file had.
-                let size = match (&steadied, clip.media_width, clip.media_height) {
-                    (Some(job), Some(width), Some(height)) if job.zoom() > 1.0 => {
-                        let grow = job
-                            .zoom()
+                // A picture drawn larger than its fit - zoomed in, scaled up
+                // by its keys, steadied by a stabilization's zoom - is
+                // decoded that much larger too, up to the file's own size,
+                // so the zoom costs no sharpness the file had. The scale and
+                // its keys as well as the stabilization (Royalty Studio
+                // fork): a picture covering a vertical frame is drawn three
+                // times its fit.
+                let zoom = drawn_zoom(clip) * steadied.as_ref().map_or(1.0, |job| job.zoom());
+                let size = match (clip.media_width, clip.media_height) {
+                    (Some(width), Some(height)) if zoom > 1.0 => {
+                        let grow = zoom
                             .min(f64::from(width) / f64::from(size.0.max(1)))
                             .min(f64::from(height) / f64::from(size.1.max(1)))
                             .max(1.0);
@@ -526,6 +530,24 @@ pub(crate) fn animation_of(keys: &[ExportKey]) -> Option<Animation> {
         },
     };
     (!animation.is_empty()).then_some(animation)
+}
+
+/// How much larger than its fit `clip` is drawn at most (Royalty Studio
+/// fork): its scale - or, keyed, the largest of its keys, the scale then
+/// being the neutral 1 - and the wider of its stretches. Never under 1.
+fn drawn_zoom(clip: &ExportClip) -> f64 {
+    let keyed = clip
+        .animation
+        .iter()
+        .filter(|key| key.property == "scale")
+        .map(|key| key.value.abs())
+        .fold(None, |most: Option<f64>, value| {
+            Some(most.map_or(value, |most| most.max(value)))
+        });
+    let scale = clip.scale.abs() * keyed.unwrap_or(1.0);
+    let stretch = clip.stretch_x.abs().max(clip.stretch_y.abs());
+    let zoom = scale * stretch.max(1.0);
+    if zoom.is_finite() { zoom.max(1.0) } else { 1.0 }
 }
 
 /// The source's contain-fitted size inside the output frame, or `None` when
