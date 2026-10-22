@@ -737,11 +737,12 @@ mod tests {
         let prefs = Preferences::default();
         assert_eq!(resolve(&prefs, "shift+left"), Some("step-back-10"));
         assert_eq!(resolve(&prefs, "shift+right"), Some("step-forward-10"));
-        // A step key rebound: the ten follow it. J was nobody's.
+        // A step key rebound: the ten follow it. G was nobody's (J is the
+        // shuttle's now; Royalty Studio fork).
         let mut prefs = prefs;
-        assert_eq!(bind(&mut prefs, "step-back", "j"), None);
-        assert_eq!(resolve(&prefs, "j"), Some("step-back"));
-        assert_eq!(resolve(&prefs, "shift+j"), Some("step-back-10"));
+        assert_eq!(bind(&mut prefs, "step-back", "g"), None);
+        assert_eq!(resolve(&prefs, "g"), Some("step-back"));
+        assert_eq!(resolve(&prefs, "shift+g"), Some("step-back-10"));
     }
 
     #[test]
@@ -764,17 +765,18 @@ mod tests {
     #[test]
     fn a_rebind_moves_the_chord_and_leaves_the_loser_none() {
         let mut prefs = Preferences::default();
-        // Mute ships on M; taking M for Delete Left leaves mute none.
-        assert_eq!(bind(&mut prefs, "delete-left", "m"), Some("mute"));
+        // The marker ships on M (Royalty Studio fork); taking M for Delete
+        // Left leaves the marker none.
+        assert_eq!(bind(&mut prefs, "delete-left", "m"), Some("marker"));
         assert_eq!(resolve(&prefs, "m"), Some("delete-left"));
-        assert_eq!(bound(&prefs, "mute"), None);
+        assert_eq!(bound(&prefs, "marker"), None);
         assert_eq!(resolve(&prefs, "q"), None);
         // The override is what is stored, not the whole table.
         assert_eq!(
             prefs.keybinds,
             [
                 ("delete-left".to_owned(), "m".to_owned()),
-                ("mute".to_owned(), String::new())
+                ("marker".to_owned(), String::new())
             ]
             .into_iter()
             .collect::<BTreeMap<_, _>>()
@@ -788,7 +790,7 @@ mod tests {
         let mut prefs = Preferences::default();
         assert_eq!(bind(&mut prefs, "delete-right", "e"), None);
         assert_eq!(bind(&mut prefs, "delete-left", "ctrl+shift+q"), None);
-        assert_eq!(bind(&mut prefs, "split", "m"), Some("mute"));
+        assert_eq!(bind(&mut prefs, "split", "m"), Some("marker"));
         let text = serde_json::to_string(&prefs).unwrap();
         let back: Preferences = serde_json::from_str(&text).unwrap();
         assert_eq!(resolve(&back, "e"), Some("delete-right"));
@@ -796,7 +798,7 @@ mod tests {
         assert_eq!(resolve(&back, "ctrl+shift+q"), Some("delete-left"));
         assert_eq!(resolve(&back, "q"), None);
         assert_eq!(resolve(&back, "m"), Some("split"));
-        assert_eq!(bound(&back, "mute"), None);
+        assert_eq!(bound(&back, "marker"), None);
         assert_eq!(resolve(&back, "ctrl+b"), None);
     }
 
@@ -815,21 +817,22 @@ mod tests {
     #[test]
     fn reset_takes_the_shipped_chord_back() {
         let mut prefs = Preferences::default();
-        // Delete Left took M from mute, leaving mute none.
-        assert_eq!(bind(&mut prefs, "delete-left", "m"), Some("mute"));
-        assert_eq!(bound(&prefs, "mute"), None);
+        // Delete Left took M from the marker, leaving the marker none.
+        assert_eq!(bind(&mut prefs, "delete-left", "m"), Some("marker"));
+        assert_eq!(bound(&prefs, "marker"), None);
         assert_eq!(bound(&prefs, "delete-left"), Some("m"));
-        // Mute's own Reset puts M back where it ships, taking it off
-        // Delete Left — a chord is one action's, and mute is the
+        // The marker's own Reset puts M back where it ships, taking it off
+        // Delete Left — a chord is one action's, and the marker is the
         // action it belongs to.
-        assert_eq!(reset(&mut prefs, "mute"), Some("delete-left"));
-        assert_eq!(bound(&prefs, "mute"), Some("m"));
+        assert_eq!(reset(&mut prefs, "marker"), Some("delete-left"));
+        assert_eq!(bound(&prefs, "marker"), Some("m"));
         assert_eq!(bound(&prefs, "delete-left"), None);
         // Delete Left's Reset returns it to Q, which nobody holds, so
         // there is no loser to name.
         assert_eq!(reset(&mut prefs, "delete-left"), None);
         assert_eq!(bound(&prefs, "delete-left"), Some("q"));
-        assert_eq!(bound(&prefs, "mute"), Some("m"));
+        assert_eq!(bound(&prefs, "marker"), Some("m"));
+        assert_eq!(bound(&prefs, "mute"), Some("shift+m"));
         reset_all(&mut prefs);
         assert!(prefs.keybinds.is_empty());
     }
