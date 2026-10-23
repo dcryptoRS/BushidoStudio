@@ -151,6 +151,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+      # More swap (Royalty Studio fork). The window crate - the Slint
+      # compiler's output for every panel, one enormous module - wants more
+      # memory than the runner's 16 GB once the fork's panels were in it:
+      # the first run's clippy had the runner itself killed ("received a
+      # shutdown signal") while it checked that crate. Swap on the runner's
+      # temporary disk lets it page rather than die.
+      - name: More swap (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          free -h
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile
+          sudo fallocate -l 16G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile > /dev/null
+          sudo swapon /mnt/swapfile
+          free -h
       # The toolchain src/rust-toolchain.toml pins, installed by name, so the
       # runner never also fetches a stable it will not use.
       - name: The pinned toolchain

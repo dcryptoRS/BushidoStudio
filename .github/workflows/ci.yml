@@ -36,13 +36,13 @@ jobs:
   engine:
     name: Engine tests and lints
     runs-on: ubuntu-24.04
-    # The steps that can run long have timeouts of their own, 170 minutes
+    # The steps that can run long have timeouts of their own, 225 minutes
     # between them, so a stuck step is named by its own timeout; this is
     # for a job stuck anywhere else. A warm run takes about twenty minutes;
     # a cold one - a new repository's first, with no cache yet, and the
     # cache is only kept when a run passes - is past half an hour for
     # clippy alone on a hosted runner (Royalty Studio fork).
-    timeout-minutes: 200
+    timeout-minutes: 240
     env:
       # See build-app.yml: the version the ort crate is built against.
       # scripts/ci/deps.lock pins the file.
@@ -51,6 +51,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+      # More swap (Royalty Studio fork). The window crate - the Slint
+      # compiler's output for every panel, one enormous module - wants more
+      # memory than the runner's 16 GB once the fork's panels were in it:
+      # the first run's clippy had the runner itself killed ("received a
+      # shutdown signal") while it checked that crate. Swap on the runner's
+      # temporary disk lets it page rather than die.
+      - name: More swap
+        run: |
+          free -h
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile
+          sudo fallocate -l 16G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile > /dev/null
+          sudo swapon /mnt/swapfile
+          free -h
       # The toolchain src/rust-toolchain.toml pins, installed by name: every
       # cargo command below runs from src/, where the pin applies, so a
       # stable installed here would only be fetched and left.
@@ -152,8 +168,15 @@ jobs:
       # public item without documentation fails here, not in review. Lints
       # before tests: they finish in a fraction of the time and catch the
       # most.
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-        timeout-minutes: 60
+      # The window crate apart, one job at a time (Royalty Studio fork): its
+      # library and its tests each take some 11 GB to check, measured, and
+      # side by side - as --all-targets runs them - 22 GB, past the runner's
+      # 16. Everything else in parallel first.
+      - run: cargo clippy --workspace --exclude concat --exclude concat-android --all-targets -- -D warnings
+        timeout-minutes: 40
+        working-directory: src
+      - run: cargo clippy -j 1 -p concat -p concat-android --all-targets -- -D warnings
+        timeout-minutes: 75
         working-directory: src
 
       # The tests are compiled in a step of their own, so a slow compile
