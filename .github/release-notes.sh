@@ -95,8 +95,9 @@ Linux, as a package for your distribution or one AppImage that runs on any.
 | Arch, Manjaro | `linux-x86_64.pkg.tar.zst` | `linux-aarch64.pkg.tar.zst` |
 | Any distribution | `x86_64.AppImage` | `aarch64.AppImage` |
 
-Transcription and the preview run on the graphics card through Vulkan:
-NVIDIA, AMD and Intel, with the card's own driver and nothing else.
+The preview and the export draw on the graphics card, and on x86_64
+transcription runs on it too, through Vulkan: NVIDIA, AMD and Intel, with
+the card's own driver and nothing else. On arm64 it runs on the CPU.
 
 `SHA256SUMS` lists each file's checksum.
 MD

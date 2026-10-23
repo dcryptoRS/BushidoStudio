@@ -160,13 +160,25 @@ jobs:
       - name: More swap (Linux)
         if: matrix.platform == 'linux'
         run: |
+          set -euo pipefail
           free -h
+          # The temporary disk where the runner has one, the root where not
+          # (the arm64 runners), and never so much that the build is left
+          # under 30 GB of disk.
+          dir=/mnt
+          [ -d /mnt ] || dir=/
+          avail=$(df --output=avail -BG "$dir" | tail -1 | tr -dc 0-9)
+          size=$(( avail > 46 ? 16 : avail - 30 ))
+          if [ "$size" -lt 2 ]; then
+            echo "no room on $dir for more swap (${avail} GB free)"
+            exit 0
+          fi
           sudo swapoff -a || true
-          sudo rm -f /mnt/swapfile
-          sudo fallocate -l 16G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile > /dev/null
-          sudo swapon /mnt/swapfile
+          sudo rm -f "$dir/bushido.swap"
+          sudo fallocate -l "${size}G" "$dir/bushido.swap"
+          sudo chmod 600 "$dir/bushido.swap"
+          sudo mkswap "$dir/bushido.swap" > /dev/null
+          sudo swapon "$dir/bushido.swap"
           free -h
       # The toolchain src/rust-toolchain.toml pins, installed by name, so the
       # runner never also fetches a stable it will not use.
