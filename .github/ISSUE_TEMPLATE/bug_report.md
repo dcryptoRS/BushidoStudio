@@ -1,38 +1,33 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Something in Bushido Studio does not work as it should
 title: ''
-labels: ''
+labels: bug
 assignees: ''
 
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**What happened**
+What you did, and what went wrong.
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+**What you expected**
+What should have happened instead.
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+**How to make it happen again**
+1. ...
+2. ...
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**Your system**
+Paste the block from Settings › About › System information (the copy
+button beside it): it has the version, the build, the graphics card and
+the distribution.
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+- Installed from: .deb / .rpm / Arch package / AppImage / built from source
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
+**The log**
+If it helps, attach the newest file in
+`~/.local/share/studio.bushido.editor/logs/` (`concat-<date>.log`).
 
-**Additional context**
-Add any other context about the problem here.
+**Screenshots or a sample**
+A screenshot, or a short clip or project that shows the problem, helps
+most.

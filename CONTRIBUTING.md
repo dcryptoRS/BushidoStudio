@@ -1,32 +1,33 @@
-# Contributing to Concat
+# Contributing to Bushido Studio
 
-Thanks for being here. Concat is a video editor that runs entirely on the
-user's machine, and it gets better mostly through people using it hard and
-reporting what broke.
+Thanks for being here. Bushido Studio is a video editor for Linux, built on
+[Concat](https://github.com/jub0t/Concat), and it gets better mostly through
+people using it hard and reporting what broke.
 
 ## The most valuable thing you can do
 
-Grab a build from the [Releases](https://github.com/jub0t/Concat/releases) page
-and edit a real video with it. Real footage finds what no reading of the
-source does. A good bug report (what you did, what happened, your
-OS, the media you used) is worth more than most patches.
+Grab a build from the [Releases](https://github.com/dcryptoRS/BushidoStudio/releases)
+page and edit a real video with it. Real footage finds what no reading of
+the source does. A good [bug report](https://github.com/dcryptoRS/BushidoStudio/issues/new/choose)
+(what you did, what happened, your distribution and graphics card, the
+media you used) is worth more than most patches.
 
-Longer-form discussion lives in
-[the contribution discussion](https://github.com/jub0t/Concat/discussions/3)
-and on [Discord](https://discord.gg/DVuPfpXfqP).
+A problem that is in Concat itself - its engine, its timeline, its
+exporter - is better reported to Concat too, so every fork gets the fix.
 
 ## Before you write code
 
-Open an issue or drop into Discord first for anything beyond a small fix. Large
+Open an issue first for anything beyond a small fix. Large
 areas are already in progress or intentionally deferred, and it is
 no fun to review a big PR that has to be turned down for reasons that were
 invisible from outside.
 
 ## Setting up
 
-You will need Rust (see `rust-version` in `src/Cargo.toml`), the FFmpeg
-7+ development libraries (`brew install ffmpeg`; see `src/README.md` for
-Windows and Linux), cmake and a C++ compiler. Then:
+You will need Rust (the version `src/rust-toolchain.toml` pins), the FFmpeg
+7+ development libraries, ONNX Runtime, cmake, a C++ compiler and libclang;
+[`.github/workflows/build-app.yml`](.github/workflows/build-app.yml) is the
+reference build. Then:
 
 ```sh
 cd src && cargo run -p concat
@@ -66,7 +67,7 @@ downloads from.
 
 Write what happens through the `log` facade (`log::info!`, `log::warn!`,
 `log::error!`) rather than to standard output or standard error. Every run
-writes `<app data>/logs/concat-<when>.log`, and a packaged build has no
+writes `~/.local/share/studio.bushido.editor/logs/concat-<when>.log`, and a packaged build has no
 terminal for anything that goes anywhere else; `CONCAT_LOG=debug` turns the
 level up. See `src/crates/concat-host/src/logs.rs`.
 
@@ -75,20 +76,13 @@ around you; the engine avoids cleverness on purpose.
 
 ## Licensing your contribution
 
-Concat is **AGPL-3.0-or-later** ([`LICENSE`](LICENSE)).
+Bushido Studio is **AGPL-3.0-or-later** ([`LICENSE`](LICENSE)), as Concat is.
 
-Contributions are accepted under the CLA in [`CLA.md`](CLA.md). **You keep the
-copyright in your work**: the CLA is a licence, not an assignment. It exists so
-that copyright in Concat stays centralised, which is what makes the AGPL
-enforceable against companies that take the code without honouring it.
-
-Sign off your commits to indicate agreement:
-
-```sh
-git commit -s -m "your message"
-```
-
-Typo and documentation fixes do not need a sign-off.
+Contributions are accepted under that same licence: what you send in is
+licensed to everyone on the terms the project is. There is no contributor
+licence agreement, and you keep the copyright in your work. (Concat's own
+CLA, which applies to contributions to Concat, is kept in
+[`docs/CONCAT-CLA.md`](docs/CONCAT-CLA.md).)
 
 ### File headers
 
@@ -99,8 +93,15 @@ Every source file starts with:
 // SPDX-FileCopyrightText: 2026 Jareer and Concat contributors
 ```
 
-Keep your own copyright line if you want one: add it, don't replace what's
-there.
+in a file that came from Concat, and
+
+```rust
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Royalty Studio
+```
+
+in one Bushido Studio added. Keep your own copyright line if you want one:
+add it, don't replace what's there.
 
 ### Third-party code
 
@@ -111,11 +112,12 @@ catch before a merge than after a release.
 
 ## Trademarks
 
-The code is free to fork. The Concat name and logo are not covered by the AGPL
-grant; see [`TRADEMARK.md`](TRADEMARK.md). Forks are welcome; please ship them
-under your own name.
+The code is free to fork. The Concat name and logo are Concat's and not
+covered by the AGPL grant ([`TRADEMARK.md`](TRADEMARK.md)), which is why this
+fork has a name of its own. Forks of Bushido Studio are welcome too; please
+ship them under your own name and logo.
 
 ## Conduct
 
-[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) applies to the repo, the Discussions
-and Discord.
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) applies to the repository, its
+issues and its pull requests.

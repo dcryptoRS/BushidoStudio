@@ -90,7 +90,7 @@ Concat está en **beta**: funciona, y aún tiene aristas. [Cuéntalo](https://gi
 
 Los **requisitos del sistema** y los tamaños de los modelos opcionales están en [el sitio web](https://concatenate.pages.dev/guides/system-requirements).
 
-**[Code signing policy](../CODE_SIGNING.md)**
+**[Code signing policy](CONCAT-CODE_SIGNING.md)**
 
 ## Cómo contribuir
 

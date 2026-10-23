@@ -45,3 +45,8 @@ added carry the line `SPDX-FileCopyrightText: 2026 Royalty Studio`.
 
 Effect ids (`concat.*`), the project format and the MCP tool names are
 Concat's still, so projects and scripts move between the two.
+
+Concat's contributor licence agreement and its Windows code-signing policy
+are kept, as Concat's, in [docs/CONCAT-CLA.md](docs/CONCAT-CLA.md) and
+[docs/CONCAT-CODE_SIGNING.md](docs/CONCAT-CODE_SIGNING.md): Bushido Studio
+takes contributions under the AGPL alone and ships for Linux.

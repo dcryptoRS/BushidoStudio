@@ -90,7 +90,7 @@ Concat **بیٹا** میں ہے: یہ کام کرتا ہے، اور ابھی ا�
 
 **سسٹم کی ضروریات** اور اختیاری ماڈلز کے سائز [ویب سائٹ](https://concatenate.pages.dev/guides/system-requirements) پر ہیں۔
 
-**[Code signing policy](../CODE_SIGNING.md)**
+**[Code signing policy](CONCAT-CODE_SIGNING.md)**
 
 ## حصہ کیسے ڈالیں
 

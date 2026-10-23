@@ -90,7 +90,7 @@ Concat এখন **বেটা** পর্যায়ে: কাজ করে,
 
 **সিস্টেমের প্রয়োজনীয়তা** এবং ঐচ্ছিক মডেলগুলোর সাইজ [ওয়েবসাইটে](https://concatenate.pages.dev/guides/system-requirements) দেওয়া আছে।
 
-**[Code signing policy](../CODE_SIGNING.md)**
+**[Code signing policy](CONCAT-CODE_SIGNING.md)**
 
 ## কীভাবে অবদান রাখবেন
 

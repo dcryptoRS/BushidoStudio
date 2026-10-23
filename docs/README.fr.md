@@ -90,7 +90,7 @@ Concat est en **bêta** : ça marche, et il reste des angles. [Dites-le](https:/
 
 La **configuration requise** et la taille des modèles optionnels sont sur [le site web](https://concatenate.pages.dev/guides/system-requirements).
 
-**[Code signing policy](../CODE_SIGNING.md)**
+**[Code signing policy](CONCAT-CODE_SIGNING.md)**
 
 ## Contribuer
 

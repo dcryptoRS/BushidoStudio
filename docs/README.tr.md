@@ -90,7 +90,7 @@ Concat **beta** aşamasında: çalışıyor, ama hâlâ pürüzleri var. Bir tan
 
 **Sistem gereksinimleri** ve isteğe bağlı model boyutları [web sitesinde](https://concatenate.pages.dev/guides/system-requirements).
 
-**[Code signing policy](../CODE_SIGNING.md)**
+**[Code signing policy](CONCAT-CODE_SIGNING.md)**
 
 ## Nasıl katkıda bulunulur
 

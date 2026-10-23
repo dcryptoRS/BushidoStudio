@@ -90,7 +90,7 @@ Concat อยู่ในช่วง **เบต้า**: ใช้งานไ
 
 **ความต้องการของระบบ** และขนาดของโมเดลเสริมดูได้ที่[เว็บไซต์](https://concatenate.pages.dev/guides/system-requirements)
 
-**[Code signing policy](../CODE_SIGNING.md)**
+**[Code signing policy](CONCAT-CODE_SIGNING.md)**
 
 ## วิธีมีส่วนร่วม
 

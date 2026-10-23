@@ -90,7 +90,7 @@ Concat đang ở giai đoạn **beta**: nó hoạt động, và vẫn còn vài 
 
 **Yêu cầu hệ thống** và kích thước các mô hình tùy chọn có trên [trang web](https://concatenate.pages.dev/guides/system-requirements).
 
-**[Code signing policy](../CODE_SIGNING.md)**
+**[Code signing policy](CONCAT-CODE_SIGNING.md)**
 
 ## Cách đóng góp
 
