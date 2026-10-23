@@ -16,8 +16,9 @@ added carry the line `SPDX-FileCopyrightText: 2026 Royalty Studio`.
   first run takes over Concat's settings and models, leaving Concat's own
   folders as they were) and the binary (`bushido-studio`). Its own version
   number, from 0.1.0; it tells a client made for Concat that it is Concat
-  0.2.8. The updater is off until Bushido Studio has a release channel of
-  its own (`concat_host::dirs::REPOSITORY`).
+  0.2.8. The updater reads Bushido Studio's own releases
+  (`concat_host::dirs::REPOSITORY`, github.com/dcryptoRS/BushidoStudio),
+  never Concat's.
 - Linux alone: the packages (.deb, .rpm, Arch, AppImage) under the new
   name, built with Whisper on Vulkan; the macOS, Windows and phone builds
   are gone from CI.

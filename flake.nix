@@ -227,9 +227,8 @@
 
           meta = {
             description = "Video editor for reels and film, based on Concat";
-            # Concat's page until Bushido Studio has a repository of its own
-            # (concat_host::dirs::REPOSITORY).
-            homepage = "https://github.com/jub0t/Concat";
+            # Bushido Studio's own (concat_host::dirs::REPOSITORY).
+            homepage = "https://github.com/dcryptoRS/BushidoStudio";
             license = pkgs.lib.licenses.agpl3Plus;
             platforms = systems;
             mainProgram = "bushido-studio";

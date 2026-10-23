@@ -22,9 +22,8 @@ priority: optional
 # chosen (Royalty Studio fork).
 maintainer: Royalty Studio <maintainer@royalty-studio.invalid>
 vendor: Royalty Studio
-# Concat's page until Bushido Studio has a repository of its own
-# (concat_host::dirs::REPOSITORY).
-homepage: https://github.com/jub0t/Concat
+# Bushido Studio's own (concat_host::dirs::REPOSITORY).
+homepage: https://github.com/dcryptoRS/BushidoStudio
 license: AGPL-3.0-or-later
 description: |
   Video editor for reels and film, based on Concat.

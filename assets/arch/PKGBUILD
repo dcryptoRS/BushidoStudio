@@ -6,8 +6,7 @@ pkgver=${BUSHIDO_VERSION:?BUSHIDO_VERSION must be set}
 pkgrel=1
 pkgdesc="Video editor for reels and film, based on Concat"
 arch=('x86_64' 'aarch64')
-# Concat's page until Bushido Studio has a repository of its own.
-url="https://github.com/jub0t/Concat"
+url="https://github.com/dcryptoRS/BushidoStudio"
 license=('AGPL-3.0-or-later')
 depends=('glibc' 'gtk3' 'fontconfig' 'freetype2' 'libxkbcommon' 'mesa' 'vulkan-icd-loader' 'alsa-lib')
 options=('!strip' '!debug')

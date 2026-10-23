@@ -866,8 +866,8 @@ mod tests {
             assert!(!kind.key().is_empty());
         }
         assert_eq!(
-            manifest_url("v0.2.6"),
-            "https://github.com/jub0t/Concat/releases/download/v0.2.6/manifest.json"
+            manifest_url("v0.1.0"),
+            "https://github.com/dcryptoRS/BushidoStudio/releases/download/v0.1.0/manifest.json"
         );
     }
 

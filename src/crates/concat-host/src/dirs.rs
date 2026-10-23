@@ -35,11 +35,11 @@ pub const PRODUCT: &str = "Bushido Studio";
 /// one. Bushido Studio's own number is the package's, counted from 0.1.0.
 pub const BASED_ON: &str = "0.2.8";
 
-/// Where Bushido Studio is published, as GitHub's `owner/name`: none until
-/// it is (Royalty Studio fork). The one line everything that leads to its
-/// releases reads - the updater, the links, the packages' homepage; while
-/// it is empty the updater stays off and the links lead to Concat.
-pub const REPOSITORY: Option<&str> = None;
+/// Where Bushido Studio is published, as GitHub's `owner/name` (Royalty
+/// Studio fork). The one line everything that leads to its releases reads -
+/// the updater, the links, the packages' homepage; with none the updater
+/// stays off and the links lead to Concat.
+pub const REPOSITORY: Option<&str> = Some("dcryptoRS/BushidoStudio");
 
 /// The name the Linux packages install under - the .deb's, the .rpm's,
 /// pacman's - and the program's on the path (Royalty Studio fork).
