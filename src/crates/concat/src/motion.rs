@@ -886,9 +886,9 @@ mod tests {
         json!({
             "templates": [{
                 "id": "badge",
-                "description": "Etiqueta pequeña con icono",
+                "description": "A small label with an icon",
                 "props": { "type": "object", "properties": {
-                    "text": { "type": "string", "description": "El texto" },
+                    "text": { "type": "string", "description": "The text" },
                     "icon": { "type": "string" },
                     "x": { "type": "number", "minimum": 0, "maximum": 1 },
                     "align": { "type": "string", "enum": ["left", "center", "right"] },
@@ -897,9 +897,9 @@ mod tests {
                 "order": ["text", "icon", "x", "align", "words"],
             }],
             "custom": [{
-                "id": "destello-dorado",
-                "description": "Un barrido de luz",
-                "defaults": { "width": 1080, "label": "Hola", "count": 14, "glow": true, "fps": 30 },
+                "id": "golden-flash",
+                "description": "A sweep of light",
+                "defaults": { "width": 1080, "label": "Hello", "count": 14, "glow": true, "fps": 30 },
                 "order": ["width", "label", "count", "glow", "fps"],
             }],
             "commonProps": { "properties": {
@@ -936,7 +936,7 @@ mod tests {
 
     #[test]
     fn an_animation_of_its_own_is_laid_out_from_what_it_was_made_with() {
-        let layout = layout(&catalogue(), "destello-dorado").expect("listed");
+        let layout = layout(&catalogue(), "golden-flash").expect("listed");
         let keys: Vec<&str> = layout.specs.iter().map(|spec| spec.key.as_str()).collect();
         assert_eq!(
             keys,
@@ -944,7 +944,7 @@ mod tests {
             "the frame is the timeline's"
         );
         assert_eq!(
-            layout.title, "Destello dorado",
+            layout.title, "Golden flash",
             "an animation of its own reads as words"
         );
         assert_eq!(

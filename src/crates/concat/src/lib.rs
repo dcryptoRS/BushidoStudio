@@ -2572,7 +2572,13 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             any(target_os = "windows", target_os = "linux")
         ))]
         match concat_speech::transcribe::cpu_backend() {
-            Ok(cpu) => log::info!("smoke: whisper runs on {cpu}"),
+            // The card when ggml has one, the CPU when not (Royalty Studio
+            // fork): the kernels' CPU alone read as though a build with
+            // Vulkan transcribed on the processor.
+            Ok(cpu) => match concat_speech::transcribe::gpu_device() {
+                Some(gpu) => log::info!("smoke: whisper runs on {gpu}, its CPU kernels for {cpu}"),
+                None => log::info!("smoke: whisper runs on {cpu}"),
+            },
             Err(error) => {
                 log::error!("smoke: {error}");
                 leave(1);

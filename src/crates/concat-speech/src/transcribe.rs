@@ -218,6 +218,35 @@ pub fn cpu_backend() -> Result<String, String> {
         .clone()
 }
 
+/// The graphics card whisper runs on, as ggml names it, once its backends
+/// are loaded (see [`cpu_backend`]); none when there is no GPU backend or
+/// no card it can drive, and whisper runs on the CPU (Royalty Studio fork).
+pub fn gpu_device() -> Option<String> {
+    use whisper_rs::whisper_rs_sys as sys;
+
+    [
+        sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU,
+        sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU,
+    ]
+    .into_iter()
+    .find_map(|kind| {
+        // SAFETY: as in `cpu_backend`: a lookup in ggml's registry, and a
+        // description ggml owns for the life of the process.
+        unsafe {
+            let device = sys::ggml_backend_dev_by_type(kind);
+            if device.is_null() {
+                return None;
+            }
+            let description = sys::ggml_backend_dev_description(device);
+            (!description.is_null()).then(|| {
+                std::ffi::CStr::from_ptr(description)
+                    .to_string_lossy()
+                    .into_owned()
+            })
+        }
+    })
+}
+
 fn model_file(dirs: &AppDirs, id: &str) -> Result<PathBuf, String> {
     // Ids come from our own table; anything else is a bug, not input.
     known(id).ok_or_else(|| format!("unknown model {id:?}"))?;

@@ -167,6 +167,13 @@ impl ExportPane {
                 // and its own rate, first on the rate list.
                 self.resolution = Self::own_rung(studio);
                 self.rate = 0;
+                // A preset picked before is picked again (Royalty Studio
+                // fork): reopened, the sheet named it beside the loudness the
+                // preferences held, which need not be its own - Reels on
+                // the row and the sound left as mixed.
+                if self.preset != 0 {
+                    self.choose_preset(studio, self.preset as i32);
+                }
             }
             ExportMsg::Close => self.open = false,
             ExportMsg::NameEdited(name) => self.name = name,
@@ -735,6 +742,10 @@ impl ExportPane {
         } else {
             self.loudness = 0;
         }
+        // The loudness a preset asks for is the one last asked for, as a
+        // loudness picked by hand is.
+        studio.prefs.export_loudness = Some(self.loudness);
+        studio.prefs.save(&studio.host.dirs);
         // The rate: the timeline's own, unless the preset caps it and the
         // timeline runs faster - Reels take 30 at most.
         let rates = Self::rates(studio);
