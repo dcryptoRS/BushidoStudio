@@ -18,9 +18,8 @@ platform: linux
 version: ${VERSION}
 section: video
 priority: optional
-# The address to publish as the maintainer: a placeholder until it is
-# chosen (Royalty Studio fork).
-maintainer: Royalty Studio <maintainer@royalty-studio.invalid>
+# The address published as the maintainer (Royalty Studio fork).
+maintainer: Royalty Studio <danynunez9200@gmail.com>
 vendor: Royalty Studio
 # Bushido Studio's own (concat_host::dirs::REPOSITORY).
 homepage: https://github.com/dcryptoRS/BushidoStudio
