@@ -156,6 +156,9 @@ enum Event {
     Text(String),
     Tool(String),
     ToolError(String),
+    /// Claude Code is not signed in (Royalty Studio fork): it says so and
+    /// asks for its own /login, which the panel cannot run for it.
+    SignIn,
     Done(Option<String>),
     Exited,
 }
@@ -350,7 +353,7 @@ fn claude_binary() -> Result<PathBuf, String> {
     candidates
         .into_iter()
         .find(|candidate| candidate.is_file())
-        .ok_or_else(|| t("claude.notFound"))
+        .ok_or_else(|| t("claude.notInstalled"))
 }
 
 /// Where Settings > Assistant and AI says concat-studio's server is, when
@@ -577,6 +580,9 @@ fn interpret(value: &Value) -> Vec<Event> {
                 _ => Vec::new(),
             }
         }
+        // The "Not logged in" reply that stands for a refusal to sign in is
+        // said once, by the result below, in the panel's own words.
+        "assistant" if value["error"] == "authentication_failed" => Vec::new(),
         "assistant" => value["message"]["content"]
             .as_array()
             .map(|blocks| {
@@ -619,6 +625,10 @@ fn interpret(value: &Value) -> Vec<Event> {
             .unwrap_or_default(),
         "result" => {
             let failed = value["is_error"] == true || value["subtype"] != "success";
+            let said = value["result"].as_str().unwrap_or_default();
+            if failed && said.contains("/login") {
+                return vec![Event::SignIn, Event::Done(None)];
+            }
             vec![Event::Done(failed.then(|| {
                 value["result"]
                     .as_str()
@@ -669,6 +679,7 @@ fn deliver(epoch: u64, events: Vec<Event>) {
                     push(&chat, TOOL, line);
                 }
                 Event::ToolError(text) => push(&chat, NOTE, tf("claude.toolFailed", &[&text])),
+                Event::SignIn => push(&chat, NOTE, t("claude.signIn")),
                 Event::Done(error) => {
                     chat.busy = false;
                     chat.streaming = None;
@@ -691,5 +702,41 @@ fn deliver(epoch: u64, events: Vec<Event>) {
     });
     if current {
         Shell::with(|shell, app| refresh(&shell.studio.borrow(), &app));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What Claude Code 2.1 writes with nobody signed in, word for word: the
+    /// panel says once how to sign in, rather than "did not finish cleanly:
+    /// Not logged in · Please run /login" under a reply that says the same.
+    #[test]
+    fn a_claude_code_nobody_signed_in_to_is_told_how_to_sign_in() {
+        let reply: Value = serde_json::from_str(
+            r#"{"type":"assistant","error":"authentication_failed","message":{"role":"assistant","content":[{"type":"text","text":"Not logged in · Please run /login"}]}}"#,
+        )
+        .unwrap();
+        assert!(interpret(&reply).is_empty());
+        let result: Value = serde_json::from_str(
+            r#"{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}"#,
+        )
+        .unwrap();
+        let events = interpret(&result);
+        assert!(matches!(
+            events.as_slice(),
+            [Event::SignIn, Event::Done(None)]
+        ));
+
+        // Any other failure still says what it was.
+        let other: Value = serde_json::from_str(
+            r#"{"type":"result","subtype":"error_during_execution","is_error":true}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            interpret(&other).as_slice(),
+            [Event::Done(Some(text))] if text == "error_during_execution"
+        ));
     }
 }
