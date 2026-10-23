@@ -24,8 +24,8 @@ concat-effects.workspace = true
 concat-host.workspace = true
 concat-project.workspace = true
 # frame_levels: the preview frame's PNG read back into numbers.
-base64 = "0.22"
-png = "0.17"
+base64 = "0.23"
+png = "0.18"
 
 [dev-dependencies]
 tempfile = "3"
